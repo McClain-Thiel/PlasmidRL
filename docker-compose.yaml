@@ -1,0 +1,87 @@
+version: "3.9"
+
+x-common: &common
+  image: plasmidrl:cuda12.1         # build this tag locally
+  working_dir: /workspace
+  user: "${UID}:${GID}"
+  environment:
+    # GPU selection and torch DDP configs
+    - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
+    - NCCL_P2P_DISABLE=0
+    - NCCL_IB_DISABLE=0
+    - NCCL_SOCKET_IFNAME=^lo,docker0
+    # Logging / caching
+    - LOG_DIR=/workspace/logs
+    - CHECKPOINT_DIR=/workspace/checkpoints
+    - HF_HOME=/workspace/.cache/huggingface
+    - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+  volumes:
+    # project code and notebooks (editable)
+    - ./:/workspace
+    # persistent outputs
+    - ./checkpoints:/workspace/checkpoints
+    - ./logs:/workspace/logs
+    - ./notebooks:/workspace/notebooks
+  device_requests:
+    - driver: nvidia
+      count: -1           # -1 = all; change per-service if needed
+      capabilities: [gpu]
+  restart: unless-stopped
+
+services:
+  # Interactive shell for debugging
+  dev:
+    <<: *common
+    command: bash
+    tty: true
+
+  # --- Long-running TRAIN job (multi-GPU via torchrun) ---
+  train:
+    <<: *common
+    # Example: run your package CLI (adjust module/args to your code)
+    command: >
+      bash -lc "
+        uv sync --frozen &&
+        uv run torchrun --nproc_per_node=${NPROC_PER_NODE}
+          -m src.cli
+          train
+          --config config/train.yaml
+          --checkpoint-dir ${CHECKPOINT_DIR}
+          --log-dir ${LOG_DIR}
+          --resume ${RESUME:=false}
+      "
+    environment:
+      - NPROC_PER_NODE=${NPROC_PER_NODE}
+      - RESUME=${RESUME}
+    profiles: ["jobs"]
+
+  # Optional: evaluation job
+  eval:
+    <<: *common
+    command: >
+      bash -lc "
+        uv sync --frozen &&
+        uv run -m src.cli eval
+          --config config/eval.yaml
+          --checkpoint ${CHECKPOINT_DIR}/latest.pt
+          --log-dir ${LOG_DIR}
+      "
+    profiles: ["jobs"]
+
+  # Optional: TensorBoard
+  tensorboard:
+    <<: *common
+    command: >
+      bash -lc "uv run python -m tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
+    ports:
+      - "6006:6006"
+    profiles: ["viz"]
+
+  # Optional: notebook
+  notebook:
+    <<: *common
+    command: >
+      bash -lc "uv run python -m jupyter lab --no-browser --ip 0.0.0.0 --NotebookApp.token='' --port 8801"
+    ports:
+      - "8801:8801"
+    profiles: ["viz"]
