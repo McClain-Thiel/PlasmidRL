@@ -1,6 +1,9 @@
+
 x-common: &common
-  image: plasmidrl:cuda12.1         # build this tag locally
-  working_dir: /workspace
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /mcclain
   user: "${UID:-1000}:${GID:-1000}"
   environment:
     # GPU selection and torch DDP configs
@@ -26,7 +29,7 @@ x-common: &common
       reservations:
         devices:
           - driver: nvidia
-            count: all     # use `all`; override per-service if needed
+            count: all
             capabilities: [gpu]
   restart: unless-stopped
 
@@ -86,7 +89,7 @@ services:
   tensorboard:
     <<: *common
     command: >
-      bash -lc "uv run python -m tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
+      bash -lc "uv run  tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
     ports:
       - "6006:6006"
     profiles: ["viz"]
@@ -95,7 +98,7 @@ services:
   notebook:
     <<: *common
     command: >
-      bash -lc "uv run python -m jupyter lab --no-browser --ip 0.0.0.0 --NotebookApp.token='' --port 8888"
+      bash -lc "cd /mcclain && uv sync --python python3.11 && uv run python -m jupyterlab --no-browser --ServerApp.ip=0.0.0.0 --ServerApp.token='' --port 8888"
     ports:
       - "8888:8888"
     depends_on:

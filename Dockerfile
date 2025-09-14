@@ -3,9 +3,10 @@ FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
 
 # Avoid interactive tzdata prompts during apt installs
 ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive
 
 # --- Minimal OS deps ---
-RUN apt-get update && TZ=${TZ} DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git build-essential bash tini \
       openssh-client tzdata && \
     rm -rf /var/lib/apt/lists/*
