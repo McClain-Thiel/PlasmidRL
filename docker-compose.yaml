@@ -15,6 +15,7 @@ x-common: &common
     - CHECKPOINT_DIR=/workspace/checkpoints
     - HF_HOME=/workspace/.cache/huggingface
     - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+    - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8000}
   volumes:
     # project code and notebooks (editable)
     - ./:/workspace
@@ -48,11 +49,13 @@ services:
           --config config/train.yaml
           --checkpoint-dir ${CHECKPOINT_DIR}
           --log-dir ${LOG_DIR}
-          --resume ${RESUME:=false}
+          --resume ${RESUME:-false}
       "
     environment:
       - NPROC_PER_NODE=${NPROC_PER_NODE}
       - RESUME=${RESUME}
+    depends_on:
+      - server
     profiles: ["jobs"]
 
   # Optional: evaluation job
@@ -66,7 +69,17 @@ services:
           --checkpoint ${CHECKPOINT_DIR}/latest.pt
           --log-dir ${LOG_DIR}
       "
+    depends_on:
+      - server
     profiles: ["jobs"]
+
+  # FastAPI backend required by train/eval
+  server:
+    build:
+      context: ${PLASMID_SERVER_PATH:-../Plasmid-Informatics-Server}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
 
   # Optional: TensorBoard
   tensorboard:
@@ -81,7 +94,9 @@ services:
   notebook:
     <<: *common
     command: >
-      bash -lc "uv run python -m jupyter lab --no-browser --ip 0.0.0.0 --NotebookApp.token='' --port 8801"
+      bash -lc "uv run python -m jupyter lab --no-browser --ip 0.0.0.0 --NotebookApp.token='' --port 8888"
     ports:
-      - "8801:8801"
+      - "8888:8888"
+    depends_on:
+      - server
     profiles: ["viz"]
