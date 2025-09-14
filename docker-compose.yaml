@@ -1,9 +1,7 @@
-version: "3.9"
-
 x-common: &common
   image: plasmidrl:cuda12.1         # build this tag locally
   working_dir: /workspace
-  user: "${UID}:${GID}"
+  user: "${UID:-1000}:${GID:-1000}"
   environment:
     # GPU selection and torch DDP configs
     - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
@@ -11,22 +9,25 @@ x-common: &common
     - NCCL_IB_DISABLE=0
     - NCCL_SOCKET_IFNAME=^lo,docker0
     # Logging / caching
-    - LOG_DIR=/workspace/logs
-    - CHECKPOINT_DIR=/workspace/checkpoints
-    - HF_HOME=/workspace/.cache/huggingface
-    - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+    - LOG_DIR=/mcclain/logs
+    - CHECKPOINT_DIR=/mcclain/checkpoints
+    - HF_HOME=/mcclain/.cache/huggingface
+    - HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
     - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8000}
   volumes:
     # project code and notebooks (editable)
-    - ./:/workspace
+    - ./:/mcclain
     # persistent outputs
-    - ./checkpoints:/workspace/checkpoints
-    - ./logs:/workspace/logs
-    - ./notebooks:/workspace/notebooks
-  device_requests:
-    - driver: nvidia
-      count: -1           # -1 = all; change per-service if needed
-      capabilities: [gpu]
+    - ./checkpoints:/mcclain/checkpoints
+    - ./logs:/mcclain/logs
+    - ./notebooks:/mcclain/notebooks
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all     # use `all`; override per-service if needed
+            capabilities: [gpu]
   restart: unless-stopped
 
 services:
@@ -79,7 +80,7 @@ services:
       context: ${PLASMID_SERVER_PATH:-../Plasmid-Informatics-Server}
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8080:8080"
 
   # Optional: TensorBoard
   tensorboard:

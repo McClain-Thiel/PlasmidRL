@@ -4,6 +4,10 @@ This project ships a GPU-ready Docker/Compose setup that builds a single deep le
 
 ---
 
+## Setup 
+
+Im assuming this in on a ec2 instancer with the TB volume attached. Change `/etc/docker/daemon.json` to say `{"data-root": "/mcclain/docker"}` to put the docker data on the big volume not on the local drive. 
+
 ## 📦 Services & Examples
 
 ### 🐚 Development Shell
