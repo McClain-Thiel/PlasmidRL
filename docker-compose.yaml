@@ -1,9 +1,10 @@
-version: "3.9"
 
 x-common: &common
-  image: plasmidrl:cuda12.1         # build this tag locally
-  working_dir: /workspace
-  user: "${UID}:${GID}"
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /mcclain
+  user: "${UID:-1000}:${GID:-1000}"
   environment:
     # GPU selection and torch DDP configs
     - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
@@ -11,21 +12,25 @@ x-common: &common
     - NCCL_IB_DISABLE=0
     - NCCL_SOCKET_IFNAME=^lo,docker0
     # Logging / caching
-    - LOG_DIR=/workspace/logs
-    - CHECKPOINT_DIR=/workspace/checkpoints
-    - HF_HOME=/workspace/.cache/huggingface
-    - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+    - LOG_DIR=/mcclain/logs
+    - CHECKPOINT_DIR=/mcclain/checkpoints
+    - HF_HOME=/mcclain/.cache/huggingface
+    - HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
+    - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8000}
   volumes:
     # project code and notebooks (editable)
-    - ./:/workspace
+    - ./:/mcclain
     # persistent outputs
-    - ./checkpoints:/workspace/checkpoints
-    - ./logs:/workspace/logs
-    - ./notebooks:/workspace/notebooks
-  device_requests:
-    - driver: nvidia
-      count: -1           # -1 = all; change per-service if needed
-      capabilities: [gpu]
+    - ./checkpoints:/mcclain/checkpoints
+    - ./logs:/mcclain/logs
+    - ./notebooks:/mcclain/notebooks
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
   restart: unless-stopped
 
 services:
@@ -48,11 +53,13 @@ services:
           --config config/train.yaml
           --checkpoint-dir ${CHECKPOINT_DIR}
           --log-dir ${LOG_DIR}
-          --resume ${RESUME:=false}
+          --resume ${RESUME:-false}
       "
     environment:
       - NPROC_PER_NODE=${NPROC_PER_NODE}
       - RESUME=${RESUME}
+    depends_on:
+      - server
     profiles: ["jobs"]
 
   # Optional: evaluation job
@@ -66,13 +73,23 @@ services:
           --checkpoint ${CHECKPOINT_DIR}/latest.pt
           --log-dir ${LOG_DIR}
       "
+    depends_on:
+      - server
     profiles: ["jobs"]
+
+  # FastAPI backend required by train/eval
+  server:
+    build:
+      context: ${PLASMID_SERVER_PATH:-../Plasmid-Informatics-Server}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
 
   # Optional: TensorBoard
   tensorboard:
     <<: *common
     command: >
-      bash -lc "uv run python -m tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
+      bash -lc "uv run  tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
     ports:
       - "6006:6006"
     profiles: ["viz"]
@@ -81,7 +98,9 @@ services:
   notebook:
     <<: *common
     command: >
-      bash -lc "uv run python -m jupyter lab --no-browser --ip 0.0.0.0 --NotebookApp.token='' --port 8801"
+      bash -lc "cd /mcclain && uv sync --python python3.11 && uv run python -m jupyterlab --no-browser --ServerApp.ip=0.0.0.0 --ServerApp.token='' --port 8888"
     ports:
-      - "8801:8801"
+      - "8888:8888"
+    depends_on:
+      - server
     profiles: ["viz"]

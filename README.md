@@ -4,6 +4,10 @@ This project ships a GPU-ready Docker/Compose setup that builds a single deep le
 
 ---
 
+## Setup 
+
+Im assuming this in on a ec2 instancer with the TB volume attached. Change `/etc/docker/daemon.json` to say `{"data-root": "/mcclain/docker"}` to put the docker data on the big volume not on the local drive. 
+
 ## 📦 Services & Examples
 
 ### 🐚 Development Shell
@@ -134,3 +138,33 @@ RESUME=false
 UID=1000
 GID=1000
 ```
+
+---
+
+## 🔗 FastAPI server integration (required)
+
+- Required by `train`, `eval`, and `notebook`.
+- Clone the server repo next to this project or set a custom path:
+
+```bash
+git clone https://github.com/ucl-cssb/Plasmid-Informatics-Server ../Plasmid-Informatics-Server
+```
+
+- Minimal `.env` entries:
+
+```dotenv
+PLASMID_SERVER_PATH=../Plasmid-Informatics-Server
+PLASMID_API_URL=http://server:8000
+```
+
+- Start backend and services:
+
+```bash
+docker compose up -d server
+# then
+docker compose run --rm train     # or: docker compose run --rm eval
+# for notebooks
+docker compose up -d notebook     # open http://localhost:8888
+```
+
+- Inside containers, call the API via `PLASMID_API_URL` (defaults to `http://server:8000`).

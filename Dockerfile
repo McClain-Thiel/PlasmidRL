@@ -1,6 +1,9 @@
-# --- Base: PyTorch + CUDA + cuDNN (pick a tag matching your host driver) ---
-# Example tag: PyTorch 2.4 + CUDA 12.1 + cuDNN8 on Ubuntu 22.04
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn8-runtime
+
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+# Avoid interactive tzdata prompts during apt installs
+ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive
 
 # --- Minimal OS deps ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,7 +25,7 @@ RUN curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | \
     echo 'export PATH="$MAMBA_ROOT_PREFIX/envs/bio/bin:$PATH"' >> ~/.bashrc
 
 ENV MAMBA_ROOT_PREFIX=/home/${USERNAME}/mamba
-ENV PATH=${MAMBA_ROOT_PREFIX}/envs/bio/bin:$PATH
+ENV PATH=/home/${USERNAME}:$PATH
 
 # --- Create a micromamba env for bio binaries ONLY (no need to mix Pythons) ---
 RUN micromamba create -y -n bio -c conda-forge -c bioconda \
