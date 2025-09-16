@@ -16,7 +16,7 @@ x-common: &common
     - CHECKPOINT_DIR=/mcclain/checkpoints
     - HF_HOME=/mcclain/.cache/huggingface
     - HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
-    - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8000}
+    - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8080}
   volumes:
     # project code and notebooks (editable)
     - ./:/mcclain
@@ -40,26 +40,24 @@ services:
     command: bash
     tty: true
 
-  # --- Long-running TRAIN job (multi-GPU via torchrun) ---
+  # --- Long-running TRAIN job (GRPO RL training) ---
   train:
     <<: *common
-    # Example: run your package CLI (adjust module/args to your code)
+    # Run the GRPO RL training script
     command: >
       bash -lc "
+        echo 'Waiting for server to be ready...' &&
+        sleep 10 &&
+        echo 'Starting GRPO RL training...' &&
         uv sync --frozen &&
-        uv run torchrun --nproc_per_node=${NPROC_PER_NODE}
-          -m src.cli
-          train
-          --config config/train.yaml
-          --checkpoint-dir ${CHECKPOINT_DIR}
-          --log-dir ${LOG_DIR}
-          --resume ${RESUME:-false}
+        uv run python -m src.runners.rl_env
       "
     environment:
-      - NPROC_PER_NODE=${NPROC_PER_NODE}
-      - RESUME=${RESUME}
+      - NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+      - RESUME=${RESUME:-false}
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     profiles: ["jobs"]
 
   # Optional: evaluation job
@@ -74,7 +72,8 @@ services:
           --log-dir ${LOG_DIR}
       "
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     profiles: ["jobs"]
 
   # FastAPI backend required by train/eval
@@ -84,6 +83,12 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Optional: TensorBoard
   tensorboard:
@@ -102,5 +107,6 @@ services:
     ports:
       - "8888:8888"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     profiles: ["viz"]
