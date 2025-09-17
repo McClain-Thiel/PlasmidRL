@@ -1,0 +1,10 @@
+- dataset_split: train
+  dataset_weight: 1.0
+  dataset_prefix: /mcclain/datasets/evo2_preprocessed/sequences/sequences_byte-level_train
+- dataset_split: validation
+  dataset_weight: 1.0
+  dataset_prefix: /mcclain/datasets/evo2_preprocessed/sequences/sequences_byte-level_val
+- dataset_split: test
+  dataset_weight: 1.0
+  dataset_prefix: /mcclain/datasets/evo2_preprocessed/sequences/sequences_byte-level_test
+

@@ -154,7 +154,7 @@ git clone https://github.com/ucl-cssb/Plasmid-Informatics-Server ../Plasmid-Info
 
 ```dotenv
 PLASMID_SERVER_PATH=../Plasmid-Informatics-Server
-PLASMID_API_URL=http://server:8000
+INFORMATICS_SERVER_URL=http://server:8080
 ```
 
 - Start backend and services:
@@ -167,4 +167,4 @@ docker compose run --rm train     # or: docker compose run --rm eval
 docker compose up -d notebook     # open http://localhost:8888
 ```
 
-- Inside containers, call the API via `PLASMID_API_URL` (defaults to `http://server:8000`).
+- Inside containers, call the API via `INFORMATICS_SERVER_URL` (defaults to `http://server:8080`).

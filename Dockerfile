@@ -41,8 +41,9 @@ ENV PATH=/home/${USERNAME}/.cargo/bin:$PATH
 
 # --- Good runtime defaults ---
 ENV BLASTDB=/db/blast
-ENV HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
-ENV HF_HOME=/workspace/.cache/huggingface
+ENV HF_HOME=/mcclain/.cache/huggingface
+ENV HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
+ENV HF_HUB_CACHE=/mcclain/.cache/huggingface/hub
 ENV TRANSFORMERS_OFFLINE=0
 
 # NCCL / multi-GPU niceties (tweak as needed)

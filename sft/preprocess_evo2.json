@@ -1,0 +1,21 @@
+{
+  "datapaths": [
+    "/mcclain/projects/data/sequences.fasta"
+  ],
+  "output_dir": "/mcclain/datasets/evo2_preprocessed/sequences",
+  "output_prefix": "sequences",
+  "train_split": 0.8,
+  "valid_split": 0.1,
+  "test_split": 0.1,
+  "overwrite": true,
+  "force_uppercase": true,
+  "tokenizer_type": "Byte-Level",
+  "vocab_size": 512,
+  "append_eod": true,
+  "workers": 4,
+  "chunksize": 1,
+  "drop_empty_sequences": true,
+  "nnn_filter": false,
+  "prompt_spacer_length": 131072
+}
+
