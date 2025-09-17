@@ -5,6 +5,8 @@ x-common: &common
     dockerfile: Dockerfile
   working_dir: /mcclain
   user: "${UID:-1000}:${GID:-1000}"
+  env_file:
+    - .env
   environment:
     # GPU selection and torch DDP configs
     - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
@@ -16,7 +18,13 @@ x-common: &common
     - CHECKPOINT_DIR=/mcclain/checkpoints
     - HF_HOME=/mcclain/.cache/huggingface
     - HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
-    - PLASMID_API_URL=${PLASMID_API_URL:-http://server:8080}
+    - UV_CACHE_DIR=/mcclain/.cache/uv
+    - INFORMATICS_SERVER_URL=${INFORMATICS_SERVER_URL:-http://server:8080}
+    # Authentication tokens (from .env file)
+    - HF_TOKEN=${HF_TOKEN}
+    - WANDB_API_KEY=${WANDB_API_KEY}
+    - ADVANTAGE_VERBOSE=true
+    - LOG_LEVEL=DEBUG
   volumes:
     # project code and notebooks (editable)
     - ./:/mcclain
@@ -76,6 +84,23 @@ services:
         condition: service_healthy
     profiles: ["jobs"]
 
+  # SFT (Supervised Fine-Tuning) job
+  sft:
+    <<: *common
+    command: >
+      bash -lc "
+        echo 'Waiting for server to be ready...' &&
+        sleep 10 &&
+        echo 'Installing SFT dependencies...' &&
+        uv sync --frozen --extra sft &&
+        echo 'Starting SFT training...' &&
+        uv run python -m src.sft.train
+      "
+    depends_on:
+      server:
+        condition: service_healthy
+    profiles: ["jobs"]
+
   # FastAPI backend required by train/eval
   server:
     build:
@@ -85,10 +110,10 @@ services:
       - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      interval: 15s
+      timeout: 60s
+      retries: 5
+      start_period: 90s
 
   # Optional: TensorBoard
   tensorboard:

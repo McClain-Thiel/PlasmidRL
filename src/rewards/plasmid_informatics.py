@@ -1,14 +1,19 @@
-from torchrl.envs import Transform
-import httpx
-import requests
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict, Tuple
 
+import httpx
+import requests
 import torch
 from tensordict import TensorDict
+from tensordict.tensorclass import NonTensorStack, NonTensorData
 from torchrl.data.tensor_specs import CompositeSpec, Unbounded
+from torchrl.envs import Transform
 
 from ..config import config
+
+logger = logging.getLogger(__name__)
 
 class RewardTransform(Transform):
     """Assign rewards by calling external scoring endpoints in parallel."""
@@ -17,6 +22,8 @@ class RewardTransform(Transform):
         self,
         rewards_server_url: Optional[str] = None,
         timeout_s: float = 60.0,
+        max_workers: Optional[int] = None,
+        log_timings: bool = False,
     ):
         super().__init__(in_keys=[], out_keys=["reward"])
 
@@ -45,6 +52,9 @@ class RewardTransform(Transform):
             "Content-Type": "text/plain; charset=utf-8",
             "Accept": "application/json, text/plain; q=0.9, */*; q=0.1",
         }
+        self._max_workers = max_workers or max(1, len(self._endpoints))
+        self._log_timings = log_timings
+        self._sample_executor = ThreadPoolExecutor(max_workers=self._max_workers)
 
     def _test_connection(self):
         try:
@@ -60,15 +70,82 @@ class RewardTransform(Transform):
             )
             ok = (resp.status_code == 200)
             if not ok:
+                snippet = text[:120]
+                if len(text) > 120:
+                    snippet += "…"
                 try:
                     preview = (resp.text or "")[:300]
                 except Exception:
                     preview = "<unreadable>"
-                print(f"[{name}] {path} -> {resp.status_code} | {preview}")
-            return {"status": ok, "name": name, "reponse": resp.json()}
+                logger.error(
+                    "[%s] %s -> %s | %s | payload_snippet=%s",
+                    name,
+                    path,
+                    resp.status_code,
+                    preview,
+                    snippet,
+                )
+            try:
+                response_data = resp.json()
+            except Exception as json_err:
+                if ok:
+                    logger.warning("[%s] %s JSON parse error: %s", name, path, json_err)
+                response_data = {}
+            return {"status": ok, "name": name, "reponse": response_data}
         except Exception as e:
-            print(f"[{name}] {path} call failed: {e}")
+            logger.error("[%s] %s call failed: %s", name, path, e)
             return {"status": False, "name": name, "reponse": {}}
+
+    def _score_single(self, idx: int, text: str, overrides: dict | None) -> tuple[int, float]:
+        if not text:
+            return idx, 0.0
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Scoring sample idx=%s length=%s overrides=%s",
+                idx,
+                len(text),
+                bool(overrides),
+            )
+
+        with ThreadPoolExecutor(max_workers=len(self._endpoints)) as executor:
+            future_to_cfg = {
+                executor.submit(
+                    self._post_text,
+                    cfg["path"],
+                    cfg.get("params", {}),
+                    text,
+                    cfg["name"],
+                ): cfg
+                for cfg in self._endpoints
+            }
+            results = []
+            for future in as_completed(future_to_cfg):
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {"status": False, "name": "<exception>", "reponse": {}, "error": str(e)}
+                results.append(result)
+
+        try:
+            reward = self.combine_rewards(results, overrides=overrides)
+        except Exception as e:
+            logger.warning("Reward calculation failed for text: %s", e)
+            reward = 0.0
+
+        if logger.isEnabledFor(logging.DEBUG):
+            status_map = {
+                str(res.get("name", "?")): bool(res.get("status", False))
+                for res in results
+            }
+            logger.debug(
+                "Sample idx=%s component_status=%s reward=%.4f",
+                idx,
+                status_map,
+                reward,
+            )
+
+        return idx, reward
 
     def combine_rewards(self, info_dicts: List[Dict], overrides: dict | None = None) -> float:
         """
@@ -216,19 +293,77 @@ class RewardTransform(Transform):
 
 
     def _call(self, td: TensorDict) -> TensorDict:
-        # 1) extract text(s)
-        llm_texts: list[str]
-        if "text" in td.keys(True):
-            t = td["text"]
-            llm_texts = [t if isinstance(t, str) else getattr(t, "response", str(t))]
-        elif "query" in td.keys(True):
-                q = td.get("query")
-                # if query is a list (batch), use it as-is; else wrap
-                llm_texts = list(q) if hasattr(q, "__iter__") and not isinstance(q, (str, bytes)) else [q]
-        else:
-            td["reward"] = torch.zeros(td.batch_size + (1,), dtype=torch.float32)
+        def _extract_strings(obj) -> list[str]:
+            if obj is None:
+                return []
+            if isinstance(obj, str):
+                return [obj]
+            if isinstance(obj, NonTensorData):
+                return _extract_strings(obj.data)
+            if isinstance(obj, NonTensorStack):
+                values: list[str] = []
+                for item in obj:
+                    values.extend(_extract_strings(item))
+                return values
+            if isinstance(obj, (list, tuple)):
+                values: list[str] = []
+                for item in obj:
+                    values.extend(_extract_strings(item))
+                return values
+            return [str(obj)]
+
+        llm_texts: list[str] = []
+        keys = td.keys(True)
+        if ("text", "response") in keys:
+            llm_texts = _extract_strings(td.get(("text", "response")))
+        elif ("text", "full") in keys:
+            llm_texts = _extract_strings(td.get(("text", "full")))
+        elif "text" in keys:
+            llm_texts = _extract_strings(td.get("text"))
+        elif "query" in keys:
+            llm_texts = _extract_strings(td.get("query"))
+
+        if not llm_texts:
+            zero = torch.zeros(td.batch_size + (1,), dtype=torch.float32)
+            if td.device is not None:
+                zero = zero.to(td.device)
+            td["reward"] = zero
+            logger.debug("RewardTransform received empty text; assigning zero reward")
             return td
-    
+
+        # Align to batch size if we only got a single flattened string
+        expected = td.numel()
+        if len(llm_texts) != expected:
+            if len(llm_texts) == 1:
+                llm_texts = llm_texts * expected
+            else:
+                llm_texts = llm_texts[:expected]
+
+        def _clean_sequence(raw: str) -> str:
+            text = str(raw)
+            # split FastChat-style or OpenAI-style special tokens
+            tokens = text.split("<|im_start|>")
+            segments = []
+            for tok in tokens:
+                if not tok:
+                    continue
+                if "|>" in tok:
+                    _, remainder = tok.split("|>", 1)
+                else:
+                    remainder = tok
+                segments.append(remainder)
+            text = "".join(segments)
+            # Remove explicit end tokens
+            text = text.replace("<|im_end|>", "")
+            # Keep only nucleotide characters and standard ambiguity codes
+            allowed = set("ACGTURYKMSWBDHVNXacgturykmswbdhvnx")
+            cleaned = "".join(ch for ch in text if ch in allowed)
+            cleaned = cleaned.upper()
+            # Ensure we don't return an empty sequence
+            return cleaned
+
+        llm_texts = [_clean_sequence(s) for s in llm_texts]
+
         # 2) extract per-example overrides (align shape)
         overrides = td.get("reward_params", None)
         if overrides is None or isinstance(overrides, dict):
@@ -236,27 +371,44 @@ class RewardTransform(Transform):
         else:
             overrides_list = list(overrides)
             if len(overrides_list) != len(llm_texts):
-                # safe fallback
                 overrides_list = [None] * len(llm_texts)
     
-        # 3) call endpoints per example (parallel using ThreadPoolExecutor)
-        rewards: list[float] = []
-        for text, ov in zip(llm_texts, overrides_list):
-            # hit the three endpoints for THIS example in parallel
-            with ThreadPoolExecutor(max_workers=len(self._endpoints)) as executor:
-                future_to_cfg = {
-                    executor.submit(self._post_text, cfg["path"], cfg.get("params", {}), text, cfg["name"]): cfg
-                    for cfg in self._endpoints
-                }
-                results = []
-                for future in as_completed(future_to_cfg):
-                    result = future.result()
-                    results.append(result)
-            
-            # combine with per-example params
-            r = self.combine_rewards(results, overrides=ov)
-            rewards.append(float(r))
-    
+        start_time = time.perf_counter() if self._log_timings else None
+
+        futures = []
+        for idx, (text, ov) in enumerate(zip(llm_texts, overrides_list)):
+            future = self._sample_executor.submit(self._score_single, idx, text, ov)
+            futures.append(future)
+        rewards: list[float] = [0.0] * len(futures)
+        failures = 0
+        for future in futures:
+            try:
+                idx, reward_val = future.result()
+                rewards[idx] = float(reward_val)
+            except Exception as exc:
+                failures += 1
+                logger.warning("Reward computation task failed: %s", exc)
+
+        successes = len(rewards) - failures
+        if logger.isEnabledFor(logging.DEBUG):
+            preview = ", ".join(f"{val:.3f}" for val in rewards[:3])
+            logger.debug(
+                "RewardTransform batch complete: size=%d successes=%d failures=%d preview=[%s]",
+                len(rewards),
+                successes,
+                failures,
+                preview,
+            )
+
+        if self._log_timings and start_time is not None:
+            elapsed = time.perf_counter() - start_time
+            logger.info(
+                "[RewardTransform] processed %d sequences in %.2fs (failures=%d)",
+                len(rewards),
+                elapsed,
+                failures,
+            )
+
         # 4) write back (vector or scalar)
         out = torch.as_tensor(rewards, dtype=torch.float32)
         # reshape to td batch
@@ -264,12 +416,19 @@ class RewardTransform(Transform):
             out = out.view(td.batch_size + (1,))
         else:
             out = out.mean().view(td.batch_size + (1,))  # conservative fallback
+        if td.device is not None:
+            out = out.to(td.device)
         td["reward"] = out
         return td
 
 
     def transform_reward_spec(self, reward_spec: CompositeSpec) -> CompositeSpec:
-        reward_spec["reward"] = Unbounded(shape=reward_spec.shape + (1,), dtype=torch.float32)
+        device = getattr(reward_spec, "device", torch.device("cpu"))
+        reward_spec["reward"] = Unbounded(
+            shape=reward_spec.shape + (1,),
+            dtype=torch.float32,
+            device=device,
+        )
         return reward_spec
 
     def close(self):
@@ -277,10 +436,18 @@ class RewardTransform(Transform):
             self.client.close()
         except Exception:
             pass
+        try:
+            self._sample_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
     def __del__(self):
         try:
             if not self.client.is_closed:
                 self.client.close()
+        except Exception:
+            pass
+        try:
+            self._sample_executor.shutdown(wait=False, cancel_futures=True)
         except Exception:
             pass
