@@ -25,7 +25,7 @@ docker run --rm \
   -e TMPDIR="$TMP_DIR" \
   -e HF_HOME="$HF_HOME" \
   -e HF_HUB_CACHE="$HF_HUB_CACHE" \
-  -v /mcclain:/mcclain \
+  -v /efs:/efs \
   -v "$PROJECT_HOST_DIR":"$WORKDIR" \
   -w "$WORKDIR" \
   "$IMAGE" bash -lc "python - <<'PY'

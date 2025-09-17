@@ -1,8 +1,8 @@
 {
   "datapaths": [
-    "/mcclain/projects/data/sequences.fasta"
+    "/efs/projects/data/sequences.fasta"
   ],
-  "output_dir": "/mcclain/datasets/evo2_preprocessed/sequences",
+  "output_dir": "/efs/datasets/evo2_preprocessed/sequences",
   "output_prefix": "sequences",
   "train_split": 0.8,
   "valid_split": 0.1,

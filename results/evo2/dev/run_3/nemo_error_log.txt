@@ -1,0 +1,9 @@
+[NeMo W 2025-09-17 18:52:26 nemo_logging:405] User-set tensorboard is currently turned off. Internally one may still be set by NeMo2.
+[NeMo W 2025-09-17 18:52:26 nemo_logging:405] There were no checkpoints found in checkpoint_dir or no checkpoint folder at checkpoint_dir :results/evo2/checkpoints. Training from scratch.
+[NeMo W 2025-09-17 18:52:29 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:29 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:30 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:30 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:30 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:30 random:222] CPU RNG state changed within GPU RNG context
+[NeMo W 2025-09-17 18:52:30 random:222] CPU RNG state changed within GPU RNG context

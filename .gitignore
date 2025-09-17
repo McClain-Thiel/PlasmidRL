@@ -9,6 +9,7 @@ __pycache__/
 /checkpoints
 /logs
 /wandb
+/lightning_logs
 
 # Distribution / packaging
 .Python

@@ -1,0 +1,80 @@
+{
+  "os":  "Linux-6.1.148-173.267.amzn2023.x86_64-x86_64-with-glibc2.39",
+  "python":  "CPython 3.12.3",
+  "startedAt":  "2025-09-17T18:52:28.377025Z",
+  "args":  [
+    "--dataset-config",
+    "sft/train_evo2.yaml",
+    "--devices",
+    "1",
+    "--num-nodes",
+    "1",
+    "--seq-length",
+    "2048",
+    "--model-size",
+    "1b",
+    "--micro-batch-size",
+    "1",
+    "--grad-acc-batches",
+    "16",
+    "--tensor-parallel-size",
+    "1",
+    "--pipeline-model-parallel-size",
+    "1",
+    "--context-parallel-size",
+    "1",
+    "--workers",
+    "4",
+    "--activation-checkpoint-recompute-num-layers",
+    "1",
+    "--fp8",
+    "--ckpt-dir",
+    "/efs/models/nemo2_evo2_1b_8k",
+    "--wandb-entity",
+    "mcclain",
+    "--wandb-project",
+    "evo2-sft",
+    "--wandb-tags",
+    "evo2",
+    "plasmidrl",
+    "sft",
+    "--wandb-group",
+    "",
+    "--wandb-job-type",
+    "finetune",
+    "--wandb-run-name",
+    ""
+  ],
+  "program":  "-m bionemo.evo2.run.train",
+  "git":  {
+    "remote":  "https://github.com/McClain-Thiel/PlasmidRL.git"
+  },
+  "email":  "mcclain.thiel@gmail.com",
+  "root":  "results/evo2",
+  "host":  "c45d3159ba1a",
+  "executable":  "/usr/bin/python",
+  "cpu_count":  2,
+  "cpu_count_logical":  4,
+  "gpu":  "NVIDIA L40S",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "214668652544",
+      "used":  "90650918912"
+    }
+  },
+  "memory":  {
+    "total":  "33167618048"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA L40S",
+      "memoryTotal":  "48305799168",
+      "cudaCores":  18176,
+      "architecture":  "Ada",
+      "uuid":  "GPU-27958f28-a8ff-a586-7d36-32333eb50db1"
+    }
+  ],
+  "cudaVersion":  "12.9",
+  "writerId":  "1uv3sr05lxzpxza3vi4urvvdcfd278dk"
+}
