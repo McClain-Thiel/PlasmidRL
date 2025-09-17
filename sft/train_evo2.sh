@@ -9,7 +9,13 @@ if [[ -f "$SCRIPT_DIR/config.env" ]]; then
     source "$SCRIPT_DIR/config.env"
 fi
 
-mkdir -p "$CACHE_DIR/uv" "$CACHE_DIR/pip" "$HF_HOME" "$HF_HUB_CACHE" "$TMP_DIR"
+# Enforce WANDB_API_KEY presence
+if [[ -z "${WANDB_API_KEY:-}" ]]; then
+    echo "ERROR: WANDB_API_KEY is required. Export it or set it in sft/config.env." >&2
+    exit 1
+fi
+
+mkdir -p "$CACHE_DIR/uv" "$CACHE_DIR/pip" "$HF_HOME" "$HF_HUB_CACHE" "$TMP_DIR" "${EXPERIMENT_DIR:-}"
 
 DATASET_CONFIG_PATH="${1:-$TRAIN_DATASET_CONFIG}"
 
@@ -22,10 +28,12 @@ docker run --rm \
   -e TMPDIR="$TMP_DIR" \
   -e HF_HOME="$HF_HOME" \
   -e HF_HUB_CACHE="$HF_HUB_CACHE" \
-  -e WANDB_API_KEY="$WANDB_API_KEY" \
+  -e WANDB_API_KEY="${WANDB_API_KEY:-}" \
   -e WANDB_ENTITY="$WANDB_ENTITY" \
   -e WANDB_PROJECT="$WANDB_PROJECT" \
-  -v /mcclain:/mcclain \
+  ${EXPERIMENT_DIR:+-e WANDB_DIR=${EXPERIMENT_DIR}} \
+  ${EXPERIMENT_DIR:+-e NEMO_LOG_DIR=${EXPERIMENT_DIR}} \
+  -v /efs:/efs \
   -v "$PROJECT_HOST_DIR":"$WORKDIR" \
   -w "$WORKDIR" \
   "$IMAGE" bash -lc "python -m bionemo.evo2.run.train \
@@ -40,6 +48,8 @@ docker run --rm \
     --pipeline-model-parallel-size ${PP_SIZE:-1} \
     --context-parallel-size ${CP_SIZE:-1} \
     --workers ${WORKERS:-8} \
+    ${CLIP_GRAD:+--clip-grad ${CLIP_GRAD}} \
+    ${DISABLE_CHECKPOINTING:+--disable-checkpointing ${DISABLE_CHECKPOINTING}} \
     ${ACT_CKPT_LAYERS:+--activation-checkpoint-recompute-num-layers ${ACT_CKPT_LAYERS}} \
     ${FP8:+--fp8} \
     ${CKPT_DIR:+--ckpt-dir ${CKPT_DIR}} \
