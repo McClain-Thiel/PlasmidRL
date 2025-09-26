@@ -68,49 +68,42 @@ services:
         condition: service_healthy
     profiles: ["jobs"]
 
-  # --- VERL job (VERL RL training) ---
   verl:
-    image: verlai/verl:app-verl0.5-transformers4.55.4-vllm0.10.0-mcore0.13.0-te2.2
+    build:
+      context: .
+      dockerfile: docker/verl.Dockerfile
     working_dir: /workspace/verl
-    runtime: nvidia
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
     environment:
-      # GPU selection and NCCL configs
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
       - NCCL_P2P_DISABLE=0
       - NCCL_IB_DISABLE=0
       - NCCL_SOCKET_IFNAME=^lo,docker0
-      # Authentication tokens (from .env file)
+      - VLLM_USE_V1=1
       - HF_TOKEN=${HF_TOKEN}
       - WANDB_API_KEY=${WANDB_API_KEY}
     volumes:
-      # Mount project files and config
-      - ./:/workspace/verl
-      # Mount data and outputs
       - ./data:/workspace/verl/data
       - ./checkpoints:/workspace/verl/checkpoints
       - ./logs:/workspace/verl/logs
-      - ./src:/workspace/verl/src
-      - ./config/verl_ppo.yaml:/workspace/verl/config/verl_ppo.yaml
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+      - ./src:/workspace/verl/src:ro
     restart: unless-stopped
-    # Run VERL training with proper command
     command: >
       bash -c "
         echo 'Waiting for server to be ready...' &&
         sleep 10 &&
         echo 'Starting VERL RL training...' &&
-        python3 -m verl.trainer.main_ppo --config-pathconfig/verl_ppo.yaml
+        python3 -m verl.trainer.main_ppo --config-name verl_ppo
       "
     depends_on:
       server:
         condition: service_healthy
     profiles: ["jobs"]
+
 
   # Optional: evaluation job
   eval:

@@ -1,45 +1,51 @@
 # configs/ppo_minimal.yaml
+defaults:
+  - ppo_trainer
+  - _self_
 data:
   tokenizer: null
   train_files: data/verl/train.parquet
   val_files: data/verl/test.parquet
   prompt_key: prompt
   max_prompt_length: 128
-  max_response_length: 512          # short continuations
-  train_batch_size: 160  # 5 prompts × 32 samples = 160 total rollouts
+  max_response_length: 512         
+  train_batch_size: 4 
   trust_remote_code: true
-  return_raw_input_ids: false
-  return_raw_chat: false
+  return_raw_input_ids: true
+  return_raw_chat: true
   return_full_prompt: false
   shuffle: true
   filter_overlong_prompts: false
   filter_overlong_prompts_workers: 1
   truncation: error
-  trust_remote_code: true
   custom_cls:
     path: null
     name: null
 
 actor_rollout_ref:
-  hybrid_engine: false
+  hybrid_engine: true
   model:
     path: McClain/plasmidgpt-addgene-gpt2
     trust_remote_code: true
     enable_gradient_checkpointing: false
+    override_config:
+      num_attention_heads: 12
+      num_key_value_heads: 12
+      attn_implementation: eager
     # Optional PEFT: uncomment to prefer LoRA on small GPUs
     # lora_rank: 16
     # lora_alpha: 32
     # lora_dropout: 0.05
   actor:
     strategy: fsdp
-    ppo_mini_batch_size: 160  # match train_batch_size for single mini-batch
-    ppo_micro_batch_size_per_gpu: 4    # increased for better GPU utilization
+    ppo_mini_batch_size: 4  # match train_batch_size for single mini-batch
+    ppo_micro_batch_size_per_gpu: 1
     use_dynamic_bsz: false
     ppo_max_token_len_per_gpu: 4096
     grad_clip: 1.0
     clip_ratio: 0.2
     entropy_coeff: 0.0
-    use_kl_loss: false
+    use_kl_loss: true
     tis_imp_ratio_cap: -1
     use_torch_compile: true
     kl_loss_coef: 0.001
@@ -58,12 +64,20 @@ actor_rollout_ref:
   ref:
     log_prob_micro_batch_size_per_gpu: 4
   rollout:
-    name: hf               # use HF generation for small setups
+    name: vllm
     do_sample: true
     top_p: 0.95
     temperature: 0.9
     n: 32
+    tensor_model_parallel_size: 1
+    enforce_eager: true
+    free_cache_engine: false
+    gpu_memory_utilization: 0.6
+    max_num_batched_tokens: 256
+    max_num_seqs: 32
+    enable_chunked_prefill: false
     response_length: ${data.max_response_length}
+    log_prob_micro_batch_size_per_gpu: 4
     calculate_log_probs: false
     val_kwargs:
       do_sample: false
@@ -78,9 +92,14 @@ critic:
       wrap_policy:
         min_num_params: 0
       param_offload: false
+    override_config:
+      num_attention_heads: 12
+      num_key_value_heads: 12
+      attn_implementation: eager
   optim:
     lr: 5.0e-5
-  ppo_micro_batch_size_per_gpu: 4  # match actor micro batch size
+  ppo_micro_batch_size_per_gpu: 1
+  enable: false
 
 reward_model:
   enable: false     # using your custom function instead
@@ -92,7 +111,7 @@ custom_reward_function:
 algorithm:
   gamma: 1.0
   lam: 1.0
-  adv_estimator: gae
+  adv_estimator: grpo
   use_kl_in_reward: false
   kl_penalty: kl
   kl_ctrl:
