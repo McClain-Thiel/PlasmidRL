@@ -7,17 +7,24 @@ data:
   train_files: data/verl/train.parquet
   val_files: data/verl/test.parquet
   prompt_key: prompt
-  max_prompt_length: 128
-  max_response_length: 512         
+  max_prompt_length: 1024
+  max_response_length: 256         
   train_batch_size: 4 
   trust_remote_code: true
   return_raw_input_ids: true
   return_raw_chat: true
   return_full_prompt: false
+  apply_chat_template_kwargs:
+    chat_template: |
+      {%- for m in messages -%}
+      {{- m['content'] -}}
+      {%- if not loop.last %}\n{%- endif -%}
+      {%- endfor -%}
   shuffle: true
   filter_overlong_prompts: false
   filter_overlong_prompts_workers: 1
-  truncation: error
+  truncation: right
+  dataloader_num_workers: 2
   custom_cls:
     path: null
     name: null

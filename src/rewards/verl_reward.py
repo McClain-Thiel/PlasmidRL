@@ -289,17 +289,29 @@ def _combine_results(api_results: List[Dict]) -> float:
     return float(total_score)
 
 
-def get_plasmid_reward(plasmid: str) -> float:
+def get_plasmid_reward(
+    plasmid: Optional[str] = None,
+    *,
+    solution_str: Optional[str] = None,
+    data_source: Optional[str] = None,
+    ground_truth: Optional[str] = None,
+    extra_info: Optional[Dict] = None,
+    **kwargs,
+) -> float:
     """
     Calculate reward for a plasmid sequence by querying informatics endpoints.
     
     Args:
-        plasmid: DNA sequence string
+        plasmid: DNA sequence string (preferred)
+        solution_str: Alternative field where VERL passes the generated text
         
     Returns:
         float: Reward score between 0.0 and ~1.05 (including GC bonus)
     """
-    if not plasmid or not plasmid.strip():
+    if plasmid is None or not str(plasmid).strip():
+        plasmid = solution_str or ""
+
+    if not plasmid.strip():
         logger.warning("Empty plasmid sequence provided")
         return 0.0
     
@@ -335,3 +347,17 @@ def get_plasmid_reward(plasmid: str) -> float:
         logger.info("Plasmid reward: 0.0000 (error)")
         logger.info("==================")
         return 0.0
+
+
+def compute_score(
+    data_source: Optional[str],
+    solution_str: Optional[str],
+    ground_truth: Optional[str],
+    extra_info: Optional[Dict] = None,
+):
+    """VERL-expected reward signature.
+
+    Delegates to get_plasmid_reward using the generated solution string.
+    You may incorporate data_source/ground_truth/extra_info if needed.
+    """
+    return get_plasmid_reward(solution_str=solution_str, data_source=data_source, ground_truth=ground_truth, extra_info=extra_info)
