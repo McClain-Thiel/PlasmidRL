@@ -89,7 +89,7 @@ services:
       - ./data:/workspace/verl/data
       - ./checkpoints:/workspace/verl/checkpoints
       - ./logs:/workspace/verl/logs
-      - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+      - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
       - ./src:/workspace/verl/src:ro
     restart: unless-stopped
     command: >
