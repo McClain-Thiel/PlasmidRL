@@ -200,40 +200,59 @@ def _calculate_gc_bonus(prodigal_data: Dict) -> float:
     """Calculate GC content bonus from prodigal data."""
     if not isinstance(prodigal_data, dict):
         return 0.0
-    
+
     metadata = prodigal_data.get("metadata", {})
     if not isinstance(metadata, dict):
         return 0.0
-    
+
     gc_raw = metadata.get("model_gc_cont") or metadata.get("gc_cont")
     if gc_raw is None:
         return 0.0
-    
+
     try:
         gc_str = str(gc_raw).strip().replace("%", "")
         gc_value = float(gc_str)
         gc_percent = gc_value / 100.0 if "%" in str(gc_raw) or gc_value > 1.0 else gc_value
-        
+
         target = DEFAULT_GC["target"]
         tolerance = DEFAULT_GC["tolerance"]
         weight = DEFAULT_GC["weight"]
-        
+
         distance = abs(gc_percent - target)
         normalized = max(0.0, 1.0 - (distance / tolerance))
-        
+
         return weight * normalized
-        
+
     except (ValueError, TypeError):
         return 0.0
 
 
-def _combine_results(api_results: List[Dict]) -> float:
+def _calculate_length_bonus(sequence_length: int) -> float:
+    """
+    Calculate length-based bonus/penalty for plasmid sequences.
+
+    Returns:
+        - +0.25 bonus for sequences <= 1000 bp
+        - Linearly decreases from +0.25 to 0.0 between 1000-20000 bp
+        - 0.0 for sequences >= 20000 bp
+    """
+    if sequence_length <= 1000:
+        return 0.25
+    elif sequence_length >= 20000:
+        return 0.0
+    else:
+        # Linear interpolation between 1000bp (+0.25) and 20000bp (0.0)
+        # slope = (0.0 - 0.25) / (20000 - 1000) = -0.25/19000
+        return 0.25 * (1.0 - (sequence_length - 1000) / 19000.0)
+
+
+def _combine_results(api_results: List[Dict], sequence_length: int) -> float:
     """Combine API results into a single reward score."""
     # Organize results by endpoint name
     by_name = {}
     successful_endpoints = []
     failed_endpoints = []
-    
+
     for result in api_results:
         endpoint_name = result.get("name", "unknown")
         if result.get("status", False):
@@ -241,51 +260,55 @@ def _combine_results(api_results: List[Dict]) -> float:
             successful_endpoints.append(endpoint_name)
         else:
             failed_endpoints.append(endpoint_name)
-    
+
     logger.info("API call results: successful=%s, failed=%s", successful_endpoints, failed_endpoints)
-    
+
     # Extract data from each endpoint
     plannotate_data = by_name.get("plannotate", [])
     amr_data = by_name.get("amrfinder", {})
     prodigal_data = by_name.get("prodigal", {})
-    
+
     # Score each component
     ori_present, mcs_present, prom_present, ori_pident, mcs_pident, prom_pident = \
         _score_plannotate_features(plannotate_data)
-    
+
     amr_present, amr_pident = _score_amr_genes(amr_data)
-    
+
     # Calculate individual component scores
     weights = DEFAULT_WEIGHTS
     ori_score = weights["ori"] * ori_pident if ori_present else 0.0
     amr_score = weights["amr"] * amr_pident if amr_present else 0.0
     mcs_score = weights["mcs"] * mcs_pident if mcs_present else 0.0
     prom_score = weights["promoter"] * prom_pident if prom_present else 0.0
-    
+
     # Main score (sum of components)
     main_score = ori_score + amr_score + mcs_score + prom_score
     main_score = min(main_score, 1.0)  # Cap at 1.0
-    
+
     # Add GC content bonus
     gc_bonus = _calculate_gc_bonus(prodigal_data)
-    
-    total_score = main_score + gc_bonus
-    
+
+    # Add length bonus
+    length_bonus = _calculate_length_bonus(sequence_length)
+
+    total_score = main_score + gc_bonus + length_bonus
+
     # Log detailed component breakdown
     logger.info("=== REWARD COMPONENT BREAKDOWN ===")
-    logger.info("ORI (origin):     present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
+    logger.info("ORI (origin):     present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)",
                 ori_present, ori_pident * 100, ori_score, weights["ori"])
-    logger.info("AMR (resistance): present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
+    logger.info("AMR (resistance): present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)",
                 amr_present, amr_pident * 100, amr_score, weights["amr"])
-    logger.info("MCS (cloning):    present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
+    logger.info("MCS (cloning):    present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)",
                 mcs_present, mcs_pident * 100, mcs_score, weights["mcs"])
-    logger.info("Promoter:         present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
+    logger.info("Promoter:         present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)",
                 prom_present, prom_pident * 100, prom_score, weights["promoter"])
     logger.info("GC content bonus: %.4f", gc_bonus)
+    logger.info("Length bonus:     %.4f (length=%d bp)", length_bonus, sequence_length)
     logger.info("Main score:       %.4f (capped at 1.0)", main_score)
     logger.info("TOTAL REWARD:     %.4f", total_score)
     logger.info("==================================")
-    
+
     return float(total_score)
 
 
@@ -327,20 +350,20 @@ def get_plasmid_reward(
     try:
         # Make parallel API calls
         api_results = _make_parallel_requests(sequence)
-        
+
         if not api_results:
             logger.warning("No successful API responses - returning 0.0")
             return 0.0
-        
+
         # Combine results into final score
-        reward = _combine_results(api_results)
-        
+        reward = _combine_results(api_results, len(sequence))
+
         logger.info("=== FINAL RESULT ===")
         logger.info("Plasmid reward: %.4f", reward)
         logger.info("==================")
-        
+
         return reward
-        
+
     except Exception as e:
         logger.error("Failed to calculate plasmid reward: %s", e)
         logger.info("=== FINAL RESULT ===")

@@ -124,16 +124,16 @@ algorithm:
     target_kl: 0.1
 
 trainer:
-  total_epochs: 10
+  total_epochs: 100                      # increased from 10 for longer training
   project_name: verl-grpo
   experiment_name: minimal
   logger: ['console', 'wandb']
   log_val_generations: 0
   nnodes: 1
   n_gpus_per_node: 1
-  save_freq: 50
+  save_freq: 10                          # save checkpoints every 10 steps
   val_before_train: false
-  test_freq: 50
+  test_freq: 10                          # test every 10 steps
   critic_warmup: 0
   default_hdfs_dir: null
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
@@ -145,6 +145,6 @@ trainer:
   wandb:
     entity: mcclain
     project: verl-grpo
-    name: plasmidgpt-dna-grpo
-    tags: ['plasmidgpt-dna', 'verl', 'grpo', 'rl']
-    notes: 'GRPO training on plasmidgpt-dna-llama-6mer for plasmid design'
+    name: plasmidgpt-dna-grpo-long
+    tags: ['plasmidgpt-dna', 'verl', 'grpo', 'rl', 'long-run']
+    notes: 'Extended GRPO training on plasmidgpt-dna for plasmid design'
