@@ -96,13 +96,14 @@ services:
       bash -c "
         echo 'Waiting for server to be ready...' &&
         sleep 10 &&
-        echo 'Starting VERL RL training...' &&
-        python3 -m verl.trainer.main_ppo --config-name verl_ppo
+        echo 'Starting VERL RL training (naive LLaMA from HF)...' &&
+        python3 -m verl.trainer.main_ppo --config-name verl_naive_ppo
       "
     depends_on:
       server:
         condition: service_healthy
     profiles: ["jobs"]
+
 
 
   # Optional: evaluation job
