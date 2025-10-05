@@ -38,6 +38,8 @@ class RewardTransform(Transform):
         self.require = {"ori": None, "amr": None, "mcs": True, "promoter": None}
         self.weights = {"ori": 0.30, "amr": 0.30, "mcs": 0.20, "promoter": 0.20}
         self.gc = {"target": 0.55, "weight": 0.05, "tolerance": 0.10}
+        # length bonus configuration: up to 0.25 at or below target length, decays slightly for longer sequences
+        self.length = {"target": 1000, "weight": 0.25, "decay_per_bp": 1e-4, "penalize_shorter": False}
         self._test_connection()
 
         # Exact paths & params per your curl commands
@@ -132,6 +134,30 @@ class RewardTransform(Transform):
         except Exception as e:
             logger.warning("Reward calculation failed for text: %s", e)
             reward = 0.0
+
+        # Apply length-based component (string length, not tokens)
+        # Maximum of 0.25 when sequence length is at or below target; gently decays for longer sequences.
+        try:
+            lconf = dict(self.length)
+            if overrides and isinstance(overrides, dict) and "length" in overrides:
+                lconf.update(overrides.get("length") or {})
+
+            target_len = max(0, int(lconf.get("target", 1000)))
+            weight = float(lconf.get("weight", 0.25))
+            decay_per_bp = float(lconf.get("decay_per_bp", 1e-4))
+            penalize_shorter = bool(lconf.get("penalize_shorter", False))
+
+            seq_len = len(text)
+            if seq_len <= target_len and not penalize_shorter:
+                length_bonus = weight
+            else:
+                delta = max(0, seq_len - target_len) if not penalize_shorter else abs(seq_len - target_len)
+                factor = max(0.0, 1.0 - decay_per_bp * float(delta))
+                length_bonus = weight * factor
+            reward += float(length_bonus)
+        except Exception:
+            # If anything goes wrong with length bonus, skip it silently
+            pass
 
         if logger.isEnabledFor(logging.DEBUG):
             status_map = {
