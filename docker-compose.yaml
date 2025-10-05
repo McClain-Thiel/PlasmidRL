@@ -97,7 +97,7 @@ services:
         echo 'Waiting for server to be ready...' &&
         sleep 10 &&
         echo 'Starting VERL RL training...' &&
-        python3 -m verl.trainer.main_ppo --config-name verl_ppo
+        python3 -m verl.trainer.main_ppo --config-name verl_grpo
       "
     depends_on:
       server:
