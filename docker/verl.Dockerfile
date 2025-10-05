@@ -7,3 +7,7 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 # Clone VERL source and install only the verl package (no deps; base image has them)
 RUN git clone --depth 1 https://github.com/volcengine/verl /opt/verl && \
     pip3 install --no-deps -e /opt/verl
+
+# Apply monkey patch fix for GPT2 compatibility
+COPY docker/verl_monkey_patch.patch /tmp/
+RUN cd /opt/verl && patch -p1 < /tmp/verl_monkey_patch.patch

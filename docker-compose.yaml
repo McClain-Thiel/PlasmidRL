@@ -91,6 +91,13 @@ services:
       - ./logs:/workspace/verl/logs
       - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
       - ./src:/workspace/verl/src:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
     command: >
       bash -c "
