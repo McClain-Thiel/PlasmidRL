@@ -4,7 +4,7 @@ defaults:
   - _self_
 
 data:
-  tokenizer: null
+  tokenizer: McClain/naive-dna-llama-6mer
   train_files: data/verl/train.parquet
   val_files: data/verl/test.parquet
   prompt_key: prompt
@@ -38,6 +38,7 @@ actor_rollout_ref:
     enable_gradient_checkpointing: false
     override_config:
       attn_implementation: eager
+      torch_dtype: bfloat16
 
   actor:
     strategy: fsdp
@@ -64,6 +65,7 @@ actor_rollout_ref:
         min_num_params: 0
       param_offload: false
       optimizer_offload: false
+      model_dtype: bfloat16
 
   ref:
     log_prob_micro_batch_size_per_gpu: 4
@@ -124,7 +126,7 @@ algorithm:
     target_kl: 0.1
 
 trainer:
-  total_epochs: 10
+  total_epochs: 1000
   project_name: verl-grpo
   experiment_name: minimal
   logger: ['console', 'wandb']

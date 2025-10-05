@@ -85,12 +85,21 @@ services:
       - VLLM_USE_V1=1
       - HF_TOKEN=${HF_TOKEN}
       - WANDB_API_KEY=${WANDB_API_KEY}
+      - HYDRA_FULL_ERROR=1
     volumes:
       - ./data:/workspace/verl/data
       - ./checkpoints:/workspace/verl/checkpoints
       - ./logs:/workspace/verl/logs
-      - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+      - ./hf_cache:/root/.cache/huggingface
+      - ./config/naive_grpo.yaml:/opt/verl/verl/trainer/config/naive_grpo.yaml:ro
       - ./src:/workspace/verl/src:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
     command: >
       bash -c "
