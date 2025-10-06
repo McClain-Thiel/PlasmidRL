@@ -1,13 +1,17 @@
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
-from src.config import Config
 from src.rewards import Score
+from src.config import Config
 
 config = Config()
 
-train_dataset = load_dataset(config.train_dataset, split="train")
-val_dataset = load_dataset(config.test_dataset, split="val")
+dataset_dict = load_dataset(
+    "parquet",
+    data_files={"train": config.train_dataset, "validation": config.test_dataset},
+)
+train_dataset = dataset_dict["train"]
+val_dataset = dataset_dict["validation"]
 
 policy_id = config.model
 tokenizer = AutoTokenizer.from_pretrained(policy_id, use_fast=True)
@@ -18,6 +22,7 @@ tokenizer.padding_side = "left"
 args = GRPOConfig(
     output_dir=config.output_dir,
     num_generations=32,                
+    generation_batch_size=64,
     per_device_train_batch_size=2,    
     learning_rate=5e-6,
     max_steps=1000,
@@ -33,17 +38,15 @@ args = GRPOConfig(
     loss_type="dapo",                 # token-normalized variant helps long CoT
     beta=0.0,                         # KL off by default; turn on (e.g., 0.02) if you see drift
     # Generation params:
-    temperature=0.7,
+    temperature=1.2,
     top_p=0.9,
-    do_sample=True,
-    generation_backend="vllm"
 )
 
 trainer = GRPOTrainer(
     model=policy_id,                  # can also pass a loaded model object
-    reward_funcs=grpo_reward,         # can be a list: [grpo_reward, "rm-model-id", ...]
+    reward_funcs=Score,         # can be a list: [grpo_reward, "rm-model-id", ...]
     args=args,
-    train_dataset=dataset,            # expects a column "prompt" by default; see docs to customize
+    train_dataset=train_dataset,            # expects a column "prompt" by default; see docs to customize
     processing_class=tokenizer,       # padding side must be left; pad_token must be set
 )
 
