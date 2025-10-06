@@ -4,13 +4,14 @@ from pydantic_settings import BaseSettings
 
 class Config(BaseSettings):
     # Model and environment configuration
-    informatics_server_url: str = "http://server:8080"
     huggingface_token: Optional[SecretStr] = Field(
         default=None,
         validation_alias=AliasChoices("hf_token", "HF_TOKEN", "HUGGINGFACE_TOKEN"),
     )
-    model: str = "McClain/plasmidgpt-addgene-gpt2"
-    
+    model: str = "McClain/plasmidgpt-addgene-gpt2
+    train_dataset: str = "data/train.parquet"
+    test_dataset: str = "data/test.parquet"
+
     # Additional environment variables
     cuda_visible_devices: str = "all"
 
