@@ -59,6 +59,7 @@ cover/
 # Hugging Face caches
 .cache/huggingface/
 .huggingface/
+hf_cache/
 
 # Translations
 *.mo
