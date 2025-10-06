@@ -8,9 +8,11 @@ class Config(BaseSettings):
         default=None,
         validation_alias=AliasChoices("hf_token", "HF_TOKEN", "HUGGINGFACE_TOKEN"),
     )
-    model: str = "McClain/plasmidgpt-addgene-gpt2
+    model: str = "McClain/plasmidgpt-addgene-gpt2"
     train_dataset: str = "data/train.parquet"
     test_dataset: str = "data/test.parquet"
+
+    output_dir: str = "checkpoints"
 
     # Additional environment variables
     cuda_visible_devices: str = "all"

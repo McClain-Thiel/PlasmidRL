@@ -1,5 +1,4 @@
-
-
+from .rewards import score_completions
 # The reward functions are expected to accept:
 
 # completions: list of model outputs for the batch
@@ -10,5 +9,4 @@ def Score(
     completions: list,
     **kwargs,
 ) -> list[float]:
-    pass
-from .rewards import annotate_completions
+    return score_completions(completions)
