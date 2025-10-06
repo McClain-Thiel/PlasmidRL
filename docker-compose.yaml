@@ -58,7 +58,7 @@ services:
         sleep 10 &&
         echo 'Starting GRPO RL training...' &&
         uv sync --frozen &&
-        uv run python -m src.runners.rl_env
+        uv run python -m src.runners.grpo
       "
     environment:
       - NPROC_PER_NODE=${NPROC_PER_NODE:-1}

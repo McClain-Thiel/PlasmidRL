@@ -13,7 +13,7 @@ class Config(BaseSettings):
     test_dataset: str = "data/test.parquet"
 
     output_dir: str = "checkpoints"
-
+    
     # Additional environment variables
     cuda_visible_devices: str = "all"
 

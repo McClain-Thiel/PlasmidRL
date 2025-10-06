@@ -10,7 +10,7 @@ logger = logging.getLogger("reward_logger")
 
 def annotate_completions(completions: list[str]) -> list[Any]:
     """Annotate a flat list of completions using threads; strips spaces from sequences."""
-    sequences = [s.replace(" ", "") for s in completions]
+    sequences = ["".join(s.split()).upper() for s in completions]
     with ThreadPoolExecutor() as executor:
         annotate = partial(pk.annotate, is_sequence=True)
         return list(executor.map(annotate, sequences))

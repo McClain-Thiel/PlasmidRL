@@ -56,6 +56,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Hugging Face caches
+.cache/huggingface/
+.huggingface/
+
 # Translations
 *.mo
 *.pot

@@ -9,4 +9,5 @@ def Score(
     completions: list,
     **kwargs,
 ) -> list[float]:
-    return score_completions(completions)
+    raw_scores = score_completions(completions)
+    return raw_scores
