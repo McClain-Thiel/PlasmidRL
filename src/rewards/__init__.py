@@ -8,7 +8,15 @@ from .rewards import score_completions
 def Score(
     completions: list,
     **kwargs,
-) -> list[float]:
-    raw_scores = score_completions(completions)
-    # Map the heuristic 0-100 score to 0-1 so higher is better while preserving scale
-    return [max(0.0, min(1.0, score / 100.0)) for score in raw_scores]
+) -> list[float] | tuple[list[float], list[dict]]:
+    return_breakdown = kwargs.get('return_breakdown', False)
+    
+    if return_breakdown:
+        raw_scores, breakdowns = score_completions(completions, return_breakdown=True)
+        # Map the heuristic 0-100 score to 0-1 so higher is better while preserving scale
+        scaled_scores = [max(0.0, min(1.0, score / 100.0)) for score in raw_scores]
+        return scaled_scores, breakdowns
+    else:
+        raw_scores = score_completions(completions)
+        # Map the heuristic 0-100 score to 0-1 so higher is better while preserving scale
+        return [max(0.0, min(1.0, score / 100.0)) for score in raw_scores]

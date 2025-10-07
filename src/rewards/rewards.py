@@ -49,7 +49,8 @@ def score_sequence(
     sequence: str,
     annotations: Any,
     target_keywords: Iterable[str] | None = None,
-) -> float:
+    return_breakdown: bool = False,
+) -> float | tuple[float, dict[str, float]]:
     """
     Heuristic backbone score for GRPO.
 
@@ -65,19 +66,51 @@ def score_sequence(
       • Payload (GOI) CDS anywhere: +8, plus +4 if any promoter within 500 bp.
 
     Penalty:
-      • Piecewise length penalty (1–10 kb, max −15) with **gentler slope at 3–5 kb**:
-          1–3 kb: up to −3; 3–5 kb: to −5; 5–7.5 kb: to −9; 7.5–10 kb: to −15.
-        Ensures removing useful features can’t increase the score.
+      • Length penalty: No penalty up to 5kb, then linear penalty from 0 to -100 over 5kb-60kb.
+        Anything above 60kb gets -100 penalty (very bad).
 
-    Returns [0, 100].
+    Returns [0, 100] or tuple (score, breakdown) if return_breakdown=True.
     """
     # ---- collect features (case-insensitive 'type') ----
     def T(x): return (x.type or "").lower()
     feats = list(annotations)
-    oris        = [x for x in feats if T(x) in ("rep_origin", "ori", "origin_of_replication")]
+    
+    # Deduplicate ORIs by location (more robust than ID alone)
+    # Two ORIs are considered duplicates if they overlap significantly
+    ori_candidates = [x for x in feats if T(x) in ("rep_origin", "ori", "origin_of_replication")]
+    
+    def overlaps(ori1, ori2, threshold=0.8):
+        """Check if two features overlap by more than threshold fraction"""
+        s1, e1 = getattr(ori1, "start", 0), getattr(ori1, "end", 0)
+        s2, e2 = getattr(ori2, "start", 0), getattr(ori2, "end", 0)
+        if s1 == 0 and e1 == 0 or s2 == 0 and e2 == 0:
+            return False  # No location info
+        overlap_start = max(s1, s2)
+        overlap_end = min(e1, e2)
+        overlap_len = max(0, overlap_end - overlap_start)
+        len1 = max(1, e1 - s1)
+        len2 = max(1, e2 - s2)
+        return (overlap_len / len1 >= threshold) or (overlap_len / len2 >= threshold)
+    
+    oris = []
+    for ori in ori_candidates:
+        # Check if this ORI overlaps with any already added
+        is_duplicate = any(overlaps(ori, existing_ori) for existing_ori in oris)
+        if not is_duplicate:
+            oris.append(ori)
+    
     promoters   = [x for x in feats if T(x) == "promoter"]
     cdss        = [x for x in feats if T(x) == "cds"]
     terminators = [x for x in feats if T(x) == "terminator"]
+    
+    # Debug logging for all features
+    if _REWARD_LOG_BREAKDOWN:
+        all_types = {}
+        for feat in feats:
+            feat_type = T(feat)
+            all_types[feat_type] = all_types.get(feat_type, 0) + 1
+        logger.info(f"reward.features total={len(feats)} types={all_types}")
+        logger.info(f"reward.ori_dedup before={len(ori_candidates)} after={len(oris)}")
 
     # ---- small helpers ----
     def strand(x): return getattr(x, "strand", "+")
@@ -112,6 +145,12 @@ def score_sequence(
         "payload": 0.0,
         "length_penalty": 0.0,
     }
+    
+    # Debug logging for ORIs
+    if _REWARD_LOG_BREAKDOWN and oris:
+        ori_ids = [getattr(ori, "id", "unknown") for ori in oris]
+        logger.info(f"reward.ori_debug count={len(oris)} ids={ori_ids}")
+    
     if len(oris) == 0:
         pass
     elif len(oris) == 1:
@@ -178,14 +217,35 @@ def score_sequence(
         score += add
         parts["standalone_terminators"] += add
 
-    # ---- Payload (GOI) anywhere ----
+    # ---- Payload (GOI) and Marker CDS ----
     target_keywords = [k.lower() for k in (target_keywords or [])]
     def is_payload(c) -> bool:
         r = role(c)
         id_l = (getattr(c, "id", "") or "").lower()
         return r in {"payload", "goi", "reporter"} or (target_keywords and any(k in id_l for k in target_keywords))
+    
+    def is_marker(c) -> bool:
+        r = role(c)
+        return r == "marker"
 
     payloads = [c for c in cdss if is_payload(c)]
+    markers = [c for c in cdss if is_marker(c)]
+    
+    # Debug logging for CDS and payload detection
+    if _REWARD_LOG_BREAKDOWN:
+        cds_info = []
+        for c in cdss:
+            cds_id = getattr(c, "id", "unknown")
+            cds_role = role(c)
+            cds_info.append(f"{cds_id}(role:{cds_role})")
+        logger.info(f"reward.cds_debug count={len(cdss)} cds={cds_info[:5]}")  # Log first 5
+        if payloads:
+            payload_ids = [getattr(p, "id", "unknown") for p in payloads]
+            logger.info(f"reward.payload_debug count={len(payloads)} ids={payload_ids}")
+        if markers:
+            logger.info(f"reward.marker_debug count={len(markers)}")
+    
+    # Payload CDS: high reward
     if payloads:
         add = 8.0
         score += add
@@ -194,31 +254,27 @@ def score_sequence(
         if any(distance(p, c) <= 500 for c in payloads for p in promoters):
             score += 4.0
             parts["payload"] += 4.0
+    
+    # Marker CDS: reward for having selection markers
+    # Give +2 per marker up to +6 to encourage selection markers
+    if markers:
+        add = float(min(6.0, 2.0 * len(markers)))
+        score += add
+        parts["payload"] += add
 
-    # ---- Length penalty: gentler at 3–5 kb ----
+    # ---- Length penalty: kicks in at 5kb, linear to 60kb ----
     L = max(0, len(sequence or ""))
 
     def length_penalty(L: int) -> float:
-        # piecewise linear:
-        # 1–3 kb:   0 → -3
-        # 3–5 kb:  -3 → -5
-        # 5–7.5 kb:-5 → -9
-        # 7.5–10 kb:-9 → -15
-        if L <= 1000:
-            return 0.0
-        if L <= 3000:
-            # span 2kb to -3
-            return 3.0 * (L - 1000) / 2000.0
+        # No penalty up to 5kb
+        # Linear penalty from 5kb to 60kb: 0 → -100
+        # Above 60kb: just return -100 (very bad)
         if L <= 5000:
-            # next 2kb adds -2 (to -5)
-            return 3.0 + 2.0 * (L - 3000) / 2000.0
-        if L <= 7500:
-            # next 2.5kb adds -4 (to -9)
-            return 5.0 + 4.0 * (L - 5000) / 2500.0
-        if L <= 10000:
-            # final 2.5kb adds -6 (to -15)
-            return 9.0 + 6.0 * (L - 7500) / 2500.0
-        return 15.0
+            return 0.0
+        if L <= 60000:
+            # Linear from 0 to -100 over 55kb range
+            return 100.0 * (L - 5000) / 55000.0
+        return 100.0  # Cap at -100 for anything above 60kb
 
     lp = length_penalty(L)
     score -= lp
@@ -240,37 +296,32 @@ def score_sequence(
                 parts["length_penalty"],
                 total,
             )
-
-            if wandb is not None:
-                wandb.log(
-                    {
-                        **({"iter": _CURRENT_ITER} if _CURRENT_ITER is not None else {}),
-                        "reward/parts/ori": parts["ori"],
-                        "reward/parts/cassettes": parts["cassettes"],
-                        "reward/parts/promoters": parts["standalone_promoters"],
-                        "reward/parts/terminators": parts["standalone_terminators"],
-                        "reward/parts/payload": parts["payload"],
-                        "reward/parts/length_penalty": parts["length_penalty"],
-                        "reward/total": total,
-                        "reward/L": float(L),
-                    },
-                    commit=True,
-                )
         except Exception:
             pass
 
+    if return_breakdown:
+        parts["L"] = float(L)
+        return total, parts
     return total
 
 
 
-def score_completions(completions: list[str]) -> list[float]:
+def score_completions(completions: list[str], return_breakdown: bool = False) -> list[float] | tuple[list[float], list[dict[str, float]]]:
     if _REWARD_LOG_TIMINGS:
         t0 = time.perf_counter()
     if not completions:
         logger.warning("reward.score_completions called with empty completions list")
-        return []
+        return [] if not return_breakdown else ([], [])
     annotations = annotate_completions(completions)
-    scores = [score_sequence(c, a) for c, a in zip(completions, annotations)]
+    
+    if return_breakdown:
+        results = [score_sequence(c, a, return_breakdown=True) for c, a in zip(completions, annotations)]
+        scores = [r[0] for r in results]
+        breakdowns = [r[1] for r in results]
+    else:
+        scores = [score_sequence(c, a) for c, a in zip(completions, annotations)]
+        breakdowns = []
+    
     if _REWARD_LOG_TIMINGS:
         dt_ms = (time.perf_counter() - t0) * 1000.0
         n = len(scores)
@@ -280,4 +331,7 @@ def score_completions(completions: list[str]) -> list[float]:
         logger.info(
             f"reward.score n={n} mean={mean_score:.2f} min={min_score:.2f} max={max_score:.2f} time_ms={dt_ms:.2f}"
         )
+    
+    if return_breakdown:
+        return scores, breakdowns
     return scores

@@ -44,8 +44,8 @@ except Exception:
 
 # Hyperparameters for ES (use sensible defaults; could be added to Config later)
 NUM_ITERATIONS = 1000            # iterations (generations)
-POPULATION_SIZE = 150             # perturbations per iteration
-SIGMA = 0.0005                    # noise scale
+POPULATION_SIZE = 50             # perturbations per iteration
+SIGMA = 0.001                    # noise scale
 ALPHA = 0.0005                   # learning rate
 MAX_NEW_TOKENS = config.max_new_tokens
 DO_SAMPLE = False                # greedy decoding for ES evaluation
@@ -73,7 +73,7 @@ def save_model_checkpoint(model, tokenizer, iteration, model_name, initial_seed,
     tokenizer.save_pretrained(save_dir)
     print(f"Checkpoint saved successfully.")
 
-def evaluate_model(model, tokenizer, input_texts, accelerator, seed_idx=None, thread_id=None, verbose=False, return_text=False):
+def evaluate_model(model, tokenizer, input_texts, accelerator, seed_idx=None, thread_id=None, verbose=False, return_text=False, return_breakdown=False):
     """
     Generate responses from the model for a batch of prompts and compute rewards using Score.
     """
@@ -122,17 +122,24 @@ def evaluate_model(model, tokenizer, input_texts, accelerator, seed_idx=None, th
     torch.cuda.empty_cache()
 
     # Compute rewards for batch texts using our plasmid Score function
-    rewards = Score(generated_texts)
+    if return_breakdown:
+        rewards, breakdowns = Score(generated_texts, return_breakdown=True)
+    else:
+        rewards = Score(generated_texts)
+        breakdowns = None
 
-
-    if return_text:
+    if return_text and return_breakdown:
+        return rewards, generated_texts, breakdowns
+    elif return_text:
         return rewards, generated_texts
+    elif return_breakdown:
+        return rewards, breakdowns
     else:
         return rewards
 
 def process_seed(seed_args):
     """Function to process a single seed, used for thread pool"""
-    seed_idx, seed, model, tokenizer, accelerator, thread_id, verbose = seed_args
+    seed_idx, seed, model, tokenizer, accelerator, thread_id, verbose, return_breakdown = seed_args
 
     if verbose:
         print(f"Process {accelerator.process_index} Thread {thread_id} processing seed {seed_idx} (value: {seed})")
@@ -157,8 +164,15 @@ def process_seed(seed_args):
 
     # Evaluate all prompts with perturbed weights in batch
     input_texts = list(DATASET_PROMPTS)
-    rewards = evaluate_model(model, tokenizer, input_texts, accelerator,
-                           seed_idx=seed_idx, thread_id=thread_id, verbose=verbose, return_text=False)
+    if return_breakdown:
+        rewards, breakdowns = evaluate_model(model, tokenizer, input_texts, accelerator,
+                               seed_idx=seed_idx, thread_id=thread_id, verbose=verbose, 
+                               return_text=False, return_breakdown=True)
+    else:
+        rewards = evaluate_model(model, tokenizer, input_texts, accelerator,
+                               seed_idx=seed_idx, thread_id=thread_id, verbose=verbose, return_text=False)
+        breakdowns = None
+    
     total_reward = sum(rewards)
 
     # Restore original weights (direct inplace modification)
@@ -186,6 +200,8 @@ def process_seed(seed_args):
     if verbose:
         print(f"Process {accelerator.process_index} Thread {thread_id} completed seed {seed_idx} with reward {average_reward:.4f}")
 
+    if return_breakdown:
+        return seed_idx, average_reward, breakdowns
     return seed_idx, average_reward
 
 
@@ -233,7 +249,7 @@ def main():
 
     # Load model on main process first then sync
     model_list = []
-    GPU_THREADS = 2  # can be tuned; keep 1 by default
+    GPU_THREADS = 4  # can be tuned; keep 1 by default
     for model_index in range(GPU_THREADS):
         model_list.append(AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -308,6 +324,7 @@ def main():
 
         # Process seeds in smaller batches to reduce memory pressure
         local_rewards = []
+        local_breakdowns = []  # collect breakdowns for averaging
         batch_size = max(1, min(GPU_THREADS, len(local_seeds)))
 
         for batch_start in range(0, len(local_seeds), batch_size):
@@ -315,14 +332,17 @@ def main():
             batch_seeds = local_seeds[batch_start:batch_end]
 
             with ThreadPoolExecutor(max_workers=len(batch_seeds)) as executor:
-                # Prepare thread arguments
+                # Prepare thread arguments - enable breakdown collection
                 thread_args = []
                 for thread_id, (seed_idx, seed) in enumerate(batch_seeds):
-                    thread_args.append((seed_idx, seed, model_list[thread_id], tokenizer, accelerator, thread_id, False))
+                    thread_args.append((seed_idx, seed, model_list[thread_id], tokenizer, accelerator, thread_id, False, True))
 
                 # Execute in parallel and collect results
                 results = list(executor.map(process_seed, thread_args))
-                local_rewards.extend(results)
+                for result in results:
+                    seed_idx, reward, breakdowns = result
+                    local_rewards.append((seed_idx, reward))
+                    local_breakdowns.extend(breakdowns)  # extend with all breakdowns from this seed
 
             # Clean up between batches
             force_memory_cleanup()
@@ -389,6 +409,15 @@ def main():
         min_reward = rewards_tensor.min().item()
         max_reward = rewards_tensor.max().item()
 
+        # Calculate average breakdown across all evaluations this iteration
+        avg_breakdown = {}
+        if local_breakdowns:
+            # Average each component across all breakdowns
+            breakdown_keys = local_breakdowns[0].keys()
+            for key in breakdown_keys:
+                values = [bd.get(key, 0.0) for bd in local_breakdowns]
+                avg_breakdown[key] = sum(values) / len(values)
+
         del rewards_tensor, rewards_normalized
         force_memory_cleanup()
 
@@ -401,22 +430,31 @@ def main():
                 try:
                     # align reward breakdown logs to the same step
                     set_reward_iter(iteration + 1)
-                    wandb.log(
-                        {
-                            "iter": iteration + 1,
-                            "reward/mean": mean_reward,
-                            "reward/min": min_reward,
-                            "reward/max": max_reward,
-                            "iter/time_s": iter_time,
-                            "gpu/mem_alloc_mb": float(torch.cuda.memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
-                            "gpu/mem_peak_mb": float(torch.cuda.max_memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
-                        }
-                    )
+                    log_dict = {
+                        "iter": iteration + 1,
+                        "reward/mean": mean_reward,
+                        "reward/min": min_reward,
+                        "reward/max": max_reward,
+                        "iter/time_s": iter_time,
+                        "gpu/mem_alloc_mb": float(torch.cuda.memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
+                        "gpu/mem_peak_mb": float(torch.cuda.max_memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
+                    }
+                    # Add averaged breakdown metrics
+                    if avg_breakdown:
+                        log_dict["reward/parts/ori"] = avg_breakdown.get("ori", 0.0)
+                        log_dict["reward/parts/cassettes"] = avg_breakdown.get("cassettes", 0.0)
+                        log_dict["reward/parts/promoters"] = avg_breakdown.get("standalone_promoters", 0.0)
+                        log_dict["reward/parts/terminators"] = avg_breakdown.get("standalone_terminators", 0.0)
+                        log_dict["reward/parts/payload"] = avg_breakdown.get("payload", 0.0)
+                        log_dict["reward/parts/length_penalty"] = avg_breakdown.get("length_penalty", 0.0)
+                        log_dict["reward/L"] = avg_breakdown.get("L", 0.0)
+                    
+                    wandb.log(log_dict)
                 except Exception:
                     pass
 
-            # Save checkpoint every 100 iterations
-            if (iteration + 1) % 100 == 0:
+            # Save checkpoint every 20 iterations
+            if (iteration + 1) % 20 == 0:
                 save_model_checkpoint(
                     original_model,
                     tokenizer,
