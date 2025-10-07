@@ -150,6 +150,9 @@ celerybeat.pid
 mnesia/
 rabbitmq/
 rabbitmq-data/
+wandb/
+logs/
+checkpoints/
 
 # ActiveMQ
 activemq-data/

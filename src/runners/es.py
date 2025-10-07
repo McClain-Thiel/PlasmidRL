@@ -44,7 +44,7 @@ except Exception:
 
 # Hyperparameters for ES (use sensible defaults; could be added to Config later)
 NUM_ITERATIONS = 1000            # iterations (generations)
-POPULATION_SIZE = 30             # perturbations per iteration
+POPULATION_SIZE = 150             # perturbations per iteration
 SIGMA = 0.0005                    # noise scale
 ALPHA = 0.0005                   # learning rate
 MAX_NEW_TOKENS = config.max_new_tokens
