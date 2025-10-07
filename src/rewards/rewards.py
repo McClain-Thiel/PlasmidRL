@@ -273,8 +273,8 @@ def score_sequence(
             return 0.0
         if L <= 60000:
             # Linear from 0 to -100 over 55kb range
-            return 100.0 * (L - 5000) / 55000.0
-        return 100.0  # Cap at -100 for anything above 60kb
+            return 10.0 * (L - 5000) / 55000.0
+        return 10.0  # Cap at -100 for anything above 60kb
 
     lp = length_penalty(L)
     score -= lp

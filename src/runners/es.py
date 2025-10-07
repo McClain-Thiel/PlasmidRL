@@ -194,8 +194,7 @@ def process_seed(seed_args):
 
     average_reward = total_reward / max(1, len(DATASET_PROMPTS))
 
-
-    force_memory_cleanup()
+    # Removed per-seed cleanup for speed - cleanup happens at batch level instead
 
     if verbose:
         print(f"Process {accelerator.process_index} Thread {thread_id} completed seed {seed_idx} with reward {average_reward:.4f}")
@@ -249,7 +248,7 @@ def main():
 
     # Load model on main process first then sync
     model_list = []
-    GPU_THREADS = 4  # can be tuned; keep 1 by default
+    GPU_THREADS = 8  # Increased from 4 - more parallel seed evaluations (tune based on GPU memory)
     for model_index in range(GPU_THREADS):
         model_list.append(AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -344,8 +343,9 @@ def main():
                     local_rewards.append((seed_idx, reward))
                     local_breakdowns.extend(breakdowns)  # extend with all breakdowns from this seed
 
-            # Clean up between batches
-            force_memory_cleanup()
+            # Clean up between batches (less aggressive to avoid overhead)
+            if batch_start % (batch_size * 4) == 0:  # Only cleanup every 4 batches
+                force_memory_cleanup()
 
         # Collect rewards from all processes
         all_rewards = torch.zeros(POPULATION_SIZE, device=accelerator.device)
