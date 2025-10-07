@@ -10,4 +10,5 @@ def Score(
     **kwargs,
 ) -> list[float]:
     raw_scores = score_completions(completions)
-    return raw_scores
+    # Map the heuristic 0-100 score to 0-1 so higher is better while preserving scale
+    return [max(0.0, min(1.0, score / 100.0)) for score in raw_scores]

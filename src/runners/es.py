@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.utils import logging
+import logging as pylog
 import numpy as np
 import os
 from accelerate import Accelerator
@@ -8,21 +9,43 @@ import time
 import torch.multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor
 import gc
-
+import wandb
 from src.config import Config
+
 from src.rewards import Score
+try:
+    from src.rewards.rewards import set_reward_iter  # local, optional
+except Exception:
+    def set_reward_iter(step):
+        return None
 
 logging.set_verbosity_error()
 torch.backends.cuda.matmul.allow_tf32 = True
-
+if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "sdp_kernel"):
+    # Disable flash/mem-efficient SDPA to use a more robust attention path
+    torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True)
 # Load project configuration (env/.env backed)
 config = Config()
+
+# Configure Python logging so reward breakdown INFO logs are visible
+try:
+    level_name = str(os.getenv("LOG_LEVEL", "INFO")).upper()
+    level = getattr(pylog, level_name, pylog.INFO)
+    if not pylog.getLogger().handlers:
+        pylog.basicConfig(
+            level=level,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    else:
+        pylog.getLogger().setLevel(level)
+except Exception:
+    pass
 
 
 # Hyperparameters for ES (use sensible defaults; could be added to Config later)
 NUM_ITERATIONS = 1000            # iterations (generations)
 POPULATION_SIZE = 30             # perturbations per iteration
-SIGMA = 0.001                    # noise scale
+SIGMA = 0.0005                    # noise scale
 ALPHA = 0.0005                   # learning rate
 MAX_NEW_TOKENS = config.max_new_tokens
 DO_SAMPLE = False                # greedy decoding for ES evaluation
@@ -57,12 +80,30 @@ def evaluate_model(model, tokenizer, input_texts, accelerator, seed_idx=None, th
     if verbose:
         print(f"Process {accelerator.process_index} Thread {thread_id} evaluating seed {seed_idx}")
 
-    # Batch tokenization
-    tokenized_inputs = tokenizer(input_texts, return_tensors="pt", padding=True, padding_side="left")
+    # Batch tokenization with safe truncation to keep within context window
+    max_ctx = int(getattr(model.config, "n_positions", getattr(model.config, "max_position_embeddings", 1024)))
+    safe_input_len = max(1, max_ctx - int(MAX_NEW_TOKENS))
+    tokenized_inputs = tokenizer(
+        input_texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=safe_input_len,
+    )
     input_ids = tokenized_inputs["input_ids"].to(accelerator.device)
     attention_mask = tokenized_inputs["attention_mask"].to(accelerator.device)
     with torch.inference_mode():
-        outputs = model.generate(input_ids, attention_mask=attention_mask, max_new_tokens=MAX_NEW_TOKENS, do_sample=DO_SAMPLE)
+        outputs = model.generate(
+            input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=MAX_NEW_TOKENS,
+            do_sample=False,
+            temperature=1.0,
+            top_k=0,
+            top_p=1.0,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
+        )
         if torch.cuda.is_available():
             torch.cuda.synchronize(accelerator.device)
 
@@ -163,10 +204,36 @@ def main():
     if accelerator.is_main_process:
         print(f"Loading model {model_name}...")
 
+    # Initialize Weights & Biases on main process only
+    if accelerator.is_main_process:
+        run = wandb.init(
+                project=getattr(config, "wandb_project", "plasmidES"),
+                entity=getattr(config, "wandb_entity", None),
+                name=getattr(config, "wandb_run_name", None) or None,
+                tags=getattr(config, "wandb_tags", None),
+                notes=getattr(config, "wandb_notes", None),
+                config={
+                    "model": model_name,
+                    "population_size": POPULATION_SIZE,
+                    "num_iterations": NUM_ITERATIONS,
+                    "sigma": SIGMA,
+                    "alpha": ALPHA,
+                    "max_new_tokens": MAX_NEW_TOKENS,
+                    "do_sample": DO_SAMPLE,
+                    "initial_seed": INITIAL_SEED,
+                },
+                reinit=True,
+            )
+            # Ensure nice x-axis
+        wandb.define_metric("iter")
+        wandb.define_metric("reward/*", step_metric="iter")
+        wandb.define_metric("iter/time_s", step_metric="iter")
+
+
 
     # Load model on main process first then sync
     model_list = []
-    GPU_THREADS = 1  # can be tuned; keep 1 by default
+    GPU_THREADS = 2  # can be tuned; keep 1 by default
     for model_index in range(GPU_THREADS):
         model_list.append(AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -177,7 +244,18 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
+
+    # Ensure model(s) use safe generation defaults and robust attention implementation
+    for m in model_list:
+        # Generation/padding configuration
+        m.config.pad_token_id = tokenizer.pad_token_id
+        if hasattr(m, "generation_config") and m.generation_config is not None:
+            m.generation_config.pad_token_id = tokenizer.pad_token_id
+            m.generation_config.eos_token_id = tokenizer.eos_token_id
+            m.generation_config.do_sample = False
+        if hasattr(m.config, "_attn_implementation"):
+            m.config._attn_implementation = "eager"
 
     if accelerator.is_main_process:
         print("Model loaded successfully")
@@ -201,6 +279,9 @@ def main():
         force_memory_cleanup()
 
         # verbose logging controlled by env LOG_LEVEL; keep minimal prints here
+
+        # Set wandb step for reward breakdown logs early in the iteration
+        set_reward_iter(iteration + 1)
 
         # Generate seeds on main process only
         if accelerator.is_main_process:
@@ -315,6 +396,25 @@ def main():
             print(f"Iteration {iteration + 1}/{NUM_ITERATIONS}, Time: {iter_time:.2f}s, Mean: {mean_reward:.2f}, Min: {min_reward:.2f}, Max: {max_reward:.2f}")
             print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
 
+            # Log metrics to Weights & Biases
+            if wandb is not None:
+                try:
+                    # align reward breakdown logs to the same step
+                    set_reward_iter(iteration + 1)
+                    wandb.log(
+                        {
+                            "iter": iteration + 1,
+                            "reward/mean": mean_reward,
+                            "reward/min": min_reward,
+                            "reward/max": max_reward,
+                            "iter/time_s": iter_time,
+                            "gpu/mem_alloc_mb": float(torch.cuda.memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
+                            "gpu/mem_peak_mb": float(torch.cuda.max_memory_allocated() / 1024**2) if torch.cuda.is_available() else 0.0,
+                        }
+                    )
+                except Exception:
+                    pass
+
             # Save checkpoint every 100 iterations
             if (iteration + 1) % 100 == 0:
                 save_model_checkpoint(
@@ -340,6 +440,12 @@ def main():
         original_model.save_pretrained(save_dir)
         tokenizer.save_pretrained(save_dir)
         print(f"Final model saved successfully.")
+        if wandb is not None:
+            try:
+                wandb.summary["total_time_s"] = float(total_time)
+                wandb.finish()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     os.environ["PYTHONWARNINGS"] = "ignore"

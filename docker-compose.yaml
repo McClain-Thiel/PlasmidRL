@@ -74,6 +74,10 @@ services:
       "
     environment:
       - NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+      - LOG_LEVEL=INFO
+      - CUDA_LAUNCH_BLOCKING=0
+      - PYTHONUNBUFFERED=1
+      - REWARD_LOG_BREAKDOWN=1
     profiles: ["jobs"]
 
   # Optional: evaluation job
