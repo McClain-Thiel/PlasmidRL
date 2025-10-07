@@ -44,18 +44,46 @@ except Exception:
 
 # Hyperparameters for ES (use sensible defaults; could be added to Config later)
 NUM_ITERATIONS = 1000            # iterations (generations)
-POPULATION_SIZE = 50             # perturbations per iteration
+POPULATION_SIZE = 40             # perturbations per iteration
 SIGMA = 0.001                    # noise scale
 ALPHA = 0.0005                   # learning rate
 MAX_NEW_TOKENS = config.max_new_tokens
 DO_SAMPLE = False                # greedy decoding for ES evaluation
 INITIAL_SEED = 33
 
+# Common starting 3-mers in plasmids
+plasmid_start_3mers = [
+    "GGA",
+    "GGC",
+    "GGG",
+    "AAT",
+    "TAC",
+    "GAT",
+    "CTG",
+    "TGA",
+    "CAA",
+]
+
+# Common starting 4-mers in plasmids
+plasmid_start_4mers = [
+    "GAAT",  # EcoRI (GAATTC)
+    "GGAT",  # BamHI (GGATCC)
+    "AAGC",  # HindIII (AAGCTT)
+    "TAAT",  # T7 promoter start
+    "GAGA",
+    "TTAA",
+    "GGGG",  # T7 +1 region
+    "CGGA",
+    "GCTG",
+    "CAGG",
+]
 
 # --- Prompts to evaluate ---
 # For plasmid design we optimize the model to directly output a DNA sequence. Use a
 # single default prompt from Config and evaluate the score of the completion.
 DATASET_PROMPTS = [config.default_query]
+
+DATASET_PROMPTS += plasmid_start_3mers + plasmid_start_4mers
 
 def force_memory_cleanup():
     gc.collect()
@@ -148,7 +176,8 @@ def process_seed(seed_args):
     for name, param in model.named_parameters():
         gen = torch.Generator(device=param.device)
 
-        gen.manual_seed(int(seed))
+        # Make noise unique per parameter by incorporating parameter name
+        gen.manual_seed(hash((int(seed), name)) % (2**31))
 
         noise = torch.randn(
             param.shape,
@@ -179,7 +208,8 @@ def process_seed(seed_args):
     for name, param in model.named_parameters():
         gen = torch.Generator(device=param.device)
 
-        gen.manual_seed(int(seed))
+        # Make noise unique per parameter by incorporating parameter name
+        gen.manual_seed(hash((int(seed), name)) % (2**31))
 
         noise = torch.randn(
             param.shape,
@@ -248,7 +278,7 @@ def main():
 
     # Load model on main process first then sync
     model_list = []
-    GPU_THREADS = 8  # Increased from 4 - more parallel seed evaluations (tune based on GPU memory)
+    GPU_THREADS = 6  # tuned down to reduce peak memory pressure
     for model_index in range(GPU_THREADS):
         model_list.append(AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -377,7 +407,8 @@ def main():
             for seed_idx in range(POPULATION_SIZE):
                 r_norm = rewards_normalized[seed_idx]
                 seed = seeds[seed_idx]
-                gen.manual_seed(int(seed))
+                # Make noise unique per parameter by incorporating parameter name
+                gen.manual_seed(hash((int(seed), name)) % (2**31))
 
                 noise = torch.randn(
                     param.shape,
