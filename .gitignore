@@ -150,6 +150,7 @@ celerybeat.pid
 mnesia/
 rabbitmq/
 rabbitmq-data/
+hf_cache/
 wandb/
 logs/
 checkpoints/
