@@ -3,17 +3,31 @@ from functools import partial
 from typing import Any
 import plasmidkit as pk
 import logging
+import time
 from typing import List, Tuple, Any, Iterable
 
 logger = logging.getLogger("reward_logger")
 
+# Toggle detailed timing logs from Config if available
+try:
+    from src.config import Config  # local import to avoid heavy deps at import time
+    _REWARD_LOG_TIMINGS = bool(Config().reward_log_timings)
+except Exception:
+    _REWARD_LOG_TIMINGS = False
+
 
 def annotate_completions(completions: list[str]) -> list[Any]:
     """Annotate a flat list of completions using threads; strips spaces from sequences."""
+    if _REWARD_LOG_TIMINGS:
+        t0 = time.perf_counter()
     sequences = [s.replace(" ", "") for s in completions]
     with ThreadPoolExecutor() as executor:
         annotate = partial(pk.annotate, is_sequence=True)
-        return list(executor.map(annotate, sequences))
+        annotations = list(executor.map(annotate, sequences))
+    if _REWARD_LOG_TIMINGS:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        logger.info(f"reward.annotate n={len(completions)} time_ms={dt_ms:.2f}")
+    return annotations
 
 from typing import Any, List, Tuple
 
@@ -179,5 +193,20 @@ def score_sequence(
 
 
 def score_completions(completions: list[str]) -> list[float]:
+    if _REWARD_LOG_TIMINGS:
+        t0 = time.perf_counter()
+    if not completions:
+        logger.warning("reward.score_completions called with empty completions list")
+        return []
     annotations = annotate_completions(completions)
-    return [score_sequence(c, a) for c, a in zip(completions, annotations)]
+    scores = [score_sequence(c, a) for c, a in zip(completions, annotations)]
+    if _REWARD_LOG_TIMINGS:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        n = len(scores)
+        mean_score = sum(scores) / n if n else 0.0
+        min_score = min(scores) if n else 0.0
+        max_score = max(scores) if n else 0.0
+        logger.info(
+            f"reward.score n={n} mean={mean_score:.2f} min={min_score:.2f} max={max_score:.2f} time_ms={dt_ms:.2f}"
+        )
+    return scores
