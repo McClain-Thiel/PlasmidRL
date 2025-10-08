@@ -6,6 +6,7 @@ import logging
 import time
 from typing import List, Tuple, Any, Iterable
 
+
 logger = logging.getLogger("reward_logger")
 
 # Toggle detailed timing logs from Config if available
@@ -29,9 +30,7 @@ def annotate_completions(completions: list[str]) -> list[Any]:
         logger.info(f"reward.annotate n={len(completions)} time_ms={dt_ms:.2f}")
     return annotations
 
-from typing import Any, List, Tuple
 
-from typing import Any, List, Tuple, Iterable
 
 def score_sequence(
     sequence: str,
