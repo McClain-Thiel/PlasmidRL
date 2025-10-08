@@ -1,37 +1,13 @@
-
 x-common: &common
   build:
     context: .
     dockerfile: Dockerfile
   working_dir: /mcclain
-  user: "${UID:-1000}:${GID:-1000}"
   env_file:
     - .env
-  environment:
-    # GPU selection and torch DDP configs
-    - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
-    - NCCL_P2P_DISABLE=0
-    - NCCL_IB_DISABLE=0
-    - NCCL_SOCKET_IFNAME=^lo,docker0
-    # Logging / caching
-    - LOG_DIR=/mcclain/logs
-    - CHECKPOINT_DIR=/mcclain/checkpoints
-    - HF_HOME=/mcclain/.cache/huggingface
-    - HF_DATASETS_CACHE=/mcclain/.cache/huggingface/datasets
-    - UV_CACHE_DIR=/mcclain/.cache/uv
-    - INFORMATICS_SERVER_URL=${INFORMATICS_SERVER_URL:-http://server:8080}
-    # Authentication tokens (from .env file)
-    - HF_TOKEN=${HF_TOKEN}
-    - WANDB_API_KEY=${WANDB_API_KEY}
-    - ADVANTAGE_VERBOSE=true
-    - LOG_LEVEL=DEBUG
   volumes:
-    # project code and notebooks (editable)
     - ./:/mcclain
-    # persistent outputs
-    - ./checkpoints:/mcclain/checkpoints
-    - ./logs:/mcclain/logs
-    - ./notebooks:/mcclain/notebooks
+  restart: unless-stopped
   deploy:
     resources:
       reservations:
@@ -39,7 +15,6 @@ x-common: &common
           - driver: nvidia
             count: all
             capabilities: [gpu]
-  restart: unless-stopped
 
 services:
   # Interactive shell for debugging
@@ -48,90 +23,86 @@ services:
     command: bash
     tty: true
 
-  # --- Long-running TRAIN job (GRPO RL training) ---
-  train:
+  # TRL: GRPO training
+  grpo-trl:
     <<: *common
-    # Run the GRPO RL training script
     command: >
       bash -lc "
-        echo 'Waiting for server to be ready...' &&
-        sleep 10 &&
-        echo 'Starting GRPO RL training...' &&
-        uv sync --frozen &&
-        uv run python -m src.runners.rl_env
+        uv sync --frozen && uv run python -m src.runners.grpo
       "
     environment:
-      - NPROC_PER_NODE=${NPROC_PER_NODE:-1}
+      # W&B settings for this job
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-trl-grpo
+      - WANDB_TAGS=["plasmid","rl","trl","grpo"]
+      - WANDB_NOTES=TRL GRPO training on plasmid design
+      # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
-    depends_on:
-      server:
-        condition: service_healthy
-    profiles: ["jobs"]
 
-  # Optional: evaluation job
+  # TRL: Evolution Strategies optimization
+  es:
+    <<: *common
+    command: >
+      bash -lc "
+        uv sync --frozen && uv run python -m src.runners.es
+      "
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-trl-es
+      - WANDB_TAGS=["plasmid","rl","trl","es"]
+      - WANDB_NOTES=TRL Evolution Strategies optimization
+
+  # VERL: PPO trainer
+  verl-ppo:
+    build:
+      context: .
+      dockerfile: docker/verl.Dockerfile
+    working_dir: /mcclain
+    volumes:
+      - ./:/mcclain
+      - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-verl-ppo
+      - WANDB_TAGS=["plasmid","rl","verl","ppo"]
+      - WANDB_NOTES=VERL PPO trainer
+      - HF_TOKEN=${HF_TOKEN}
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    command: >
+      bash -lc "
+        echo 'Starting VERL PPO...' && python3 -m verl.trainer.main_ppo --config-name verl_ppo
+      "
+    
+
+  # VERL: GRPO trainer
+  verl-grpo:
+    build:
+      context: .
+      dockerfile: docker/verl.Dockerfile
+    working_dir: /mcclain
+    volumes:
+      - ./:/mcclain
+      - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-verl-grpo
+      - WANDB_TAGS=["plasmid","rl","verl","grpo"]
+      - WANDB_NOTES=VERL GRPO trainer
+      - HF_TOKEN=${HF_TOKEN}
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    command: >
+      bash -lc "
+        echo 'Starting VERL GRPO...' && python3 -m verl.trainer.main_ppo --config-name verl_grpo
+      "
+    
+
+  # Optional: evaluation CLI if present
   eval:
     <<: *common
     command: >
-      bash -lc "
-        uv sync --frozen &&
-        uv run -m src.cli eval
-          --config config/eval.yaml
-          --checkpoint ${CHECKPOINT_DIR}/latest.pt
-          --log-dir ${LOG_DIR}
-      "
-    depends_on:
-      server:
-        condition: service_healthy
-    profiles: ["jobs"]
-
-  # SFT (Supervised Fine-Tuning) job
-  sft:
-    <<: *common
-    command: >
-      bash -lc "
-        echo 'Waiting for server to be ready...' &&
-        sleep 10 &&
-        echo 'Installing SFT dependencies...' &&
-        uv sync --frozen --extra sft &&
-        echo 'Starting SFT training...' &&
-        uv run python -m src.sft.train
-      "
-    depends_on:
-      server:
-        condition: service_healthy
-    profiles: ["jobs"]
-
-  # FastAPI backend required by train/eval
-  server:
-    build:
-      context: ${PLASMID_SERVER_PATH:-../Plasmid-Informatics-Server}
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 60s
-      retries: 5
-      start_period: 90s
-
-  # Optional: TensorBoard
-  tensorboard:
-    <<: *common
-    command: >
-      bash -lc "uv run  tensorboard.main --logdir ${LOG_DIR} --host 0.0.0.0 --port 6006"
-    ports:
-      - "6006:6006"
-    profiles: ["viz"]
-
-  # Optional: notebook
-  notebook:
-    <<: *common
-    command: >
-      bash -lc "cd /mcclain && uv sync --python python3.11 && uv run python -m jupyterlab --no-browser --ServerApp.ip=0.0.0.0 --ServerApp.token='' --port 8888"
-    ports:
-      - "8888:8888"
-    depends_on:
-      server:
-        condition: service_healthy
-    profiles: ["viz"]
+      bash -lc "uv sync --frozen && uv run -m src.cli eval"
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-eval
+      - WANDB_TAGS=["eval"]
+      - WANDB_NOTES=Evaluation job

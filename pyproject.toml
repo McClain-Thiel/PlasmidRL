@@ -1,19 +1,20 @@
 [project]
 name = "plasmidrl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Project based on using RL to make plasmids"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.10.1",
     "click>=8.1.7",
+    "datasets>=4.1.1",
     "ipykernel>=6.30.1",
     "ipython>=8.18.1",
     "ipywidgets>=8.1.7",
     "jupyter-client>=8.6.3",
     "jupyter-core>=5.8.1",
     "jupyterlab>=4.4.7",
-    "plannotate-python>=1.2.7",
+    "plasmidkit",
     "psutil>=7.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
@@ -23,22 +24,11 @@ dependencies = [
     "tornado>=6.5.2",
     "traitlets>=5.14.3",
     "transformers>=4.56.1",
-    "trl>=0.22.2",
+    "trl[vllm]>=0.22.2",
     "wandb>=0.21.3",
 ]
 
-[project.optional-dependencies]
-sft = [
-    # SFT-specific dependencies
-    "datasets>=3.1.0",
-    "evaluate>=0.4.3",
-    "peft>=0.13.2",
-    "bitsandbytes>=0.45.0",
-    "accelerate>=0.20.0",
-    "scipy>=1.9.0",
-    # Re-enabling BioNeMo Evo2 with build workarounds
-    "bionemo-evo2 @ git+https://github.com/NVIDIA/bionemo-framework.git@main#subdirectory=sub-packages/bionemo-evo2",
-]
+
 dev = [
     # Development dependencies
     "pytest>=8.0.0",
@@ -48,5 +38,5 @@ dev = [
     "mypy>=1.10.0",
 ]
 
-[tool.uv.extra-build-dependencies]
-mamba-ssm = ["torch"]
+[tool.uv.sources]
+plasmidkit = { git = "https://github.com/McClain-Thiel/plasmid-kit.git" }
