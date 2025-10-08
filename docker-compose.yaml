@@ -31,9 +31,11 @@ services:
         uv sync --frozen && uv run python -m src.runners.grpo
       "
     environment:
-      # Hard-coded W&B project specifics for this repo
-      - WANDB_PROJECT=plasmidrl
+      # W&B settings for this job
       - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-trl-grpo
+      - WANDB_TAGS=["plasmid","rl","trl","grpo"]
+      - WANDB_NOTES=TRL GRPO training on plasmid design
       # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
 
@@ -45,8 +47,10 @@ services:
         uv sync --frozen && uv run python -m src.runners.es
       "
     environment:
-      - WANDB_PROJECT=plasmidrl
       - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-trl-es
+      - WANDB_TAGS=["plasmid","rl","trl","es"]
+      - WANDB_NOTES=TRL Evolution Strategies optimization
 
   # VERL: PPO trainer
   verl-ppo:
@@ -58,8 +62,10 @@ services:
       - ./:/mcclain
       - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
     environment:
-      - WANDB_PROJECT=plasmidrl
       - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-verl-ppo
+      - WANDB_TAGS=["plasmid","rl","verl","ppo"]
+      - WANDB_NOTES=VERL PPO trainer
       - HF_TOKEN=${HF_TOKEN}
       - WANDB_API_KEY=${WANDB_API_KEY}
     command: >
@@ -78,8 +84,10 @@ services:
       - ./:/mcclain
       - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
     environment:
-      - WANDB_PROJECT=plasmidrl
       - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-verl-grpo
+      - WANDB_TAGS=["plasmid","rl","verl","grpo"]
+      - WANDB_NOTES=VERL GRPO trainer
       - HF_TOKEN=${HF_TOKEN}
       - WANDB_API_KEY=${WANDB_API_KEY}
     command: >
@@ -93,3 +101,8 @@ services:
     <<: *common
     command: >
       bash -lc "uv sync --frozen && uv run -m src.cli eval"
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-eval
+      - WANDB_TAGS=["eval"]
+      - WANDB_NOTES=Evaluation job
