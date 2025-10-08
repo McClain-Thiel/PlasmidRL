@@ -17,13 +17,12 @@ services:
     tty: true
     gpus: all
 
-  # Training job (GRPO-based RL)
-  train:
+  # TRL: GRPO training
+  grpo-trl:
     <<: *common
     command: >
       bash -lc "
-        uv sync --frozen &&
-        uv run python -m src.runners.rl_env
+        uv sync --frozen && uv run python -m src.runners.grpo
       "
     environment:
       # Hard-coded W&B project specifics for this repo
@@ -31,22 +30,63 @@ services:
       - WANDB_ENTITY=mcclain
       # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
-    depends_on:
-      server:
-        condition: service_healthy
     gpus: all
 
-  # FastAPI backend required by train
-  server:
-    build:
-      context: ${PLASMID_SERVER_PATH:-../Plasmid-Informatics-Server}
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 60s
-      retries: 5
-      start_period: 90s
+  # TRL: Evolution Strategies optimization
+  es:
+    <<: *common
+    command: >
+      bash -lc "
+        uv sync --frozen && uv run python -m src.runners.es
+      "
+    environment:
+      - WANDB_PROJECT=plasmidrl
+      - WANDB_ENTITY=mcclain
+    gpus: all
 
+  # VERL: PPO trainer
+  verl-ppo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /mcclain
+    volumes:
+      - ./:/mcclain
+      - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+    environment:
+      - WANDB_PROJECT=plasmidrl
+      - WANDB_ENTITY=mcclain
+      - HF_TOKEN=${HF_TOKEN}
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    command: >
+      bash -lc "
+        echo 'Starting VERL PPO...' && python3 -m verl.trainer.main_ppo --config-name verl_ppo
+      "
+    gpus: all
+
+  # VERL: GRPO trainer
+  verl-grpo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /mcclain
+    volumes:
+      - ./:/mcclain
+      - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
+    environment:
+      - WANDB_PROJECT=plasmidrl
+      - WANDB_ENTITY=mcclain
+      - HF_TOKEN=${HF_TOKEN}
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    command: >
+      bash -lc "
+        echo 'Starting VERL GRPO...' && python3 -m verl.trainer.main_ppo --config-name verl_grpo
+      "
+    gpus: all
+
+  # Optional: evaluation CLI if present
+  eval:
+    <<: *common
+    command: >
+      bash -lc "uv sync --frozen && uv run -m src.cli eval"
+    gpus: all
