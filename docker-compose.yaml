@@ -8,6 +8,13 @@ x-common: &common
   volumes:
     - ./:/mcclain
   restart: unless-stopped
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
 
 services:
   # Interactive shell for debugging
@@ -15,7 +22,6 @@ services:
     <<: *common
     command: bash
     tty: true
-    gpus: all
 
   # TRL: GRPO training
   grpo-trl:
@@ -30,7 +36,6 @@ services:
       - WANDB_ENTITY=mcclain
       # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
-    gpus: all
 
   # TRL: Evolution Strategies optimization
   es:
@@ -42,13 +47,12 @@ services:
     environment:
       - WANDB_PROJECT=plasmidrl
       - WANDB_ENTITY=mcclain
-    gpus: all
 
   # VERL: PPO trainer
   verl-ppo:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/verl.Dockerfile
     working_dir: /mcclain
     volumes:
       - ./:/mcclain
@@ -62,13 +66,13 @@ services:
       bash -lc "
         echo 'Starting VERL PPO...' && python3 -m verl.trainer.main_ppo --config-name verl_ppo
       "
-    gpus: all
+    
 
   # VERL: GRPO trainer
   verl-grpo:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/verl.Dockerfile
     working_dir: /mcclain
     volumes:
       - ./:/mcclain
@@ -82,11 +86,10 @@ services:
       bash -lc "
         echo 'Starting VERL GRPO...' && python3 -m verl.trainer.main_ppo --config-name verl_grpo
       "
-    gpus: all
+    
 
   # Optional: evaluation CLI if present
   eval:
     <<: *common
     command: >
       bash -lc "uv sync --frozen && uv run -m src.cli eval"
-    gpus: all
