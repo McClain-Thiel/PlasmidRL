@@ -33,6 +33,7 @@ args = GRPOConfig(
     gradient_accumulation_steps=4,
     max_prompt_length=256,
     max_completion_length=512,
+    gradient_checkpointing=False,
     # Reward shaping & loss style:
     scale_rewards="batch",            # robust scaling; try False for Dr.GRPO-style
     loss_type="dapo",                 # token-normalized variant helps long CoT
