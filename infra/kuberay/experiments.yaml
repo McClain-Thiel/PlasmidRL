@@ -1,0 +1,35 @@
+experiments:
+  grpo-trl:
+    entrypoint: |
+      uv sync --frozen && uv run python -m src.runners.grpo
+    needs_gpu: true
+    gpu_family: g6
+    num_gpus: 1
+    ttl_seconds: 10800
+    env:
+      WANDB_PROJECT: plasmidrl-trl-grpo
+      WANDB_TAGS: '["plasmid","rl","trl","grpo"]'
+      WANDB_NOTES: TRL GRPO training on plasmid design
+
+  es:
+    entrypoint: |
+      uv sync --frozen && uv run python -m src.runners.es
+    needs_gpu: false
+    num_gpus: 0
+    ttl_seconds: 7200
+    env:
+      WANDB_PROJECT: plasmidrl-trl-es
+      WANDB_TAGS: '["plasmid","rl","trl","es"]'
+      WANDB_NOTES: TRL Evolution Strategies optimization
+
+  verl-ppo:
+    entrypoint: |
+      echo 'Starting VERL PPO...' && python3 -m verl.trainer.main_ppo --config-name verl_ppo
+    needs_gpu: true
+    gpu_family: g6
+    num_gpus: 1
+    ttl_seconds: 14400
+    env:
+      WANDB_PROJECT: plasmidrl-verl-ppo
+      WANDB_TAGS: '["plasmid","rl","verl","ppo"]'
+      WANDB_NOTES: VERL PPO trainer

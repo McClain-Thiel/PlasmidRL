@@ -1,0 +1,109 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: plasmidrl-eks
+  region: us-east-1
+  version: "1.29"
+
+iam:
+  withOIDC: true
+  serviceAccounts:
+    - metadata:
+        name: cluster-autoscaler
+        namespace: kube-system
+        labels:
+          k8s-addon: cluster-autoscaler.addons.k8s.io
+          k8s-app: cluster-autoscaler
+      wellKnownPolicies:
+        autoScaler: true
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AutoScalingFullAccess
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+      roleName: eksctl-plasmidrl-eks-cluster-autoscaler
+    - metadata:
+        name: ray
+        namespace: default
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      roleName: eksctl-plasmidrl-eks-ray
+
+managedNodeGroups:
+  - name: system-small
+    instanceTypes: ["t3.medium"]
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 2
+    labels: { role: system, ray-head: "true" }
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/plasmidrl-eks: "owned"
+    ssh:
+      enableSsm: true
+
+  - name: system-large
+    instanceTypes: ["t3.large"]
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 2
+    labels: { role: system, ray-head: "true" }
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/plasmidrl-eks: "owned"
+    ssh:
+      enableSsm: true
+
+  - name: cpu-spot
+    instanceTypes: ["m6i.large", "c6i.large", "m5.large", "c5.large"]
+    desiredCapacity: 0
+    minSize: 0
+    maxSize: 10
+    labels: { workload: "cpu" }
+    taints:
+      - key: workload
+        value: cpu
+        effect: NoSchedule
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/plasmidrl-eks: "owned"
+    spot: true
+    ssh:
+      enableSsm: true
+
+  # New on-demand G6 pool (preferred, relatively affordable)
+  - name: gpu-g6-ondemand
+    instanceTypes: ["g6.2xlarge", "g6.4xlarge", "g6.8xlarge", "g6e.2xlarge", "g6e.4xlarge"]
+    subnets:
+      - subnet-053862eb5c65aa7c2
+      - subnet-0459471db352b3705
+    desiredCapacity: 0
+    minSize: 0
+    maxSize: 5
+    labels: { workload: "gpu-g6", "nvidia.com/gpu.present": "true" }
+    taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/plasmidrl-eks: "owned"
+    ssh:
+      enableSsm: true
+
+  # Optional high-end P6 on spot for bursty heavy jobs
+  - name: gpu-p6-spot
+    instanceTypes: ["p6-b200.48xlarge"]
+    desiredCapacity: 0
+    minSize: 0
+    maxSize: 2
+    labels: { workload: "gpu-p6", "nvidia.com/gpu.present": "true" }
+    taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/plasmidrl-eks: "owned"
+    spot: true
+    ssh:
+      enableSsm: true

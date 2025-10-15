@@ -46,3 +46,13 @@ Notes
 - W&B entity is hard-coded to `mcclain`; adjust in `docker-compose.yaml` if needed.
 - VERL services mount config YAMLs into `/opt/verl/verl/trainer/config/`.
 
+Ray on EKS (external access)
+- Ray cluster head service (LoadBalancer):
+  - Host: ac898ed8d0f3441a29315b985b15a9fa-897444232.us-east-1.elb.amazonaws.com
+  - Client: `ray.init("ray://ac898ed8d0f3441a29315b985b15a9fa-897444232.us-east-1.elb.amazonaws.com:10001")`
+  - Dashboard: `http://ac898ed8d0f3441a29315b985b15a9fa-897444232.us-east-1.elb.amazonaws.com:8265`
+- IP restrictions: LoadBalancer is locked to specific IPs via `loadBalancerSourceRanges`.
+  - Your current IP has been allowlisted.
+  - To add another IP: `scripts/secure_head_lb.sh <NEW_IP>/32`
+  - To allow multiple: `scripts/secure_head_lb.sh 198.51.100.10/32,203.0.113.25/32`
+- For private-only access (optional): switch to an internal LB or use a VPN/bastion; see `devops.md`.

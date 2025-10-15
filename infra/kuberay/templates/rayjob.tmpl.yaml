@@ -1,0 +1,22 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: ${NAME}
+  namespace: ${NAMESPACE}
+spec:
+  rayClusterName: ${CLUSTER_NAME}
+  entrypoint: |
+    ${ENTRYPOINT}
+  shutdownAfterJobFinishes: false
+  ttlSecondsAfterFinished: ${TTL_SECONDS}
+  # Optional: pass environment to the Ray driver via runtime env
+  runtimeEnvYAML: |
+    env_vars:
+      WANDB_ENTITY: ${WANDB_ENTITY}
+      WANDB_PROJECT: ${WANDB_PROJECT}
+      WANDB_TAGS: ${WANDB_TAGS}
+      WANDB_NOTES: ${WANDB_NOTES}
+      HF_TOKEN: ${HF_TOKEN}
+      EXP_GPU_FAMILY: ${GPU_FAMILY}
+      EXP_NEEDS_GPU: ${NEEDS_GPU}
+${EXTRA_RUNTIME_ENV}

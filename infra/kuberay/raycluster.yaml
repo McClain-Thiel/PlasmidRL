@@ -1,0 +1,186 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: plasmidray
+  namespace: default
+  labels:
+    ray.io/cluster: plasmidray
+spec:
+  enableInTreeAutoscaling: true
+  rayVersion: "2.34.0"
+  headGroupSpec:
+    serviceType: LoadBalancer
+    rayStartParams:
+      port: "6379"
+      dashboard-host: "0.0.0.0"
+      num-cpus: "2"
+    template:
+      metadata:
+        labels:
+          ray-node-type: head
+      spec:
+        serviceAccountName: ray
+        nodeSelector:
+          ray-head: "true"
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: "2Gi"
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.34.0
+            imagePullPolicy: IfNotPresent
+            resources:
+              requests:
+                cpu: "1"
+                memory: "2Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
+            volumeMounts:
+              - name: dshm
+                mountPath: /dev/shm
+            ports:
+              - containerPort: 6379 # GCS
+              - containerPort: 8265 # dashboard
+              - containerPort: 10001 # client
+            env:
+              - name: RAY_GCS_SERVER_PORT
+                value: "6379"
+              - name: RAY_GRAFANA_HOST
+                value: "http://aa41883b7b9144411a80fe55a1e74c8f-501617025.us-east-1.elb.amazonaws.com"
+              - name: RAY_PROMETHEUS_HOST
+                value: "http://kps-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+            # args managed via rayStartParams
+
+  workerGroupSpecs:
+    - groupName: cpu-workers
+      rayStartParams:
+        address: "plasmidray-head-svc:6379"
+        num-cpus: "4"
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: 10
+      template:
+        metadata:
+          labels:
+            ray-node-type: worker
+            workload: cpu
+        spec:
+          serviceAccountName: ray
+          nodeSelector:
+            workload: cpu
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: "8Gi"
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: cpu
+              effect: NoSchedule
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.34.0
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: "4Gi"
+                limits:
+                  cpu: "4"
+                  memory: "8Gi"
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+              # args managed via rayStartParams
+
+    - groupName: gpu-g6-workers
+      rayStartParams:
+        address: "plasmidray-head-svc:6379"
+        num-cpus: "4"
+        num-gpus: "1"
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: 5
+      template:
+        metadata:
+          labels:
+            ray-node-type: worker
+            workload: gpu
+        spec:
+          serviceAccountName: ray
+          nodeSelector:
+            workload: gpu-g6
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: "16Gi"
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.34.0-gpu
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: "3"
+                  memory: "8Gi"
+                  nvidia.com/gpu: "1"
+                limits:
+                  cpu: "8"
+                  memory: "16Gi"
+                  nvidia.com/gpu: "1"
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+              # args managed via rayStartParams
+
+    - groupName: gpu-p6-workers
+      rayStartParams:
+        address: "plasmidray-head-svc:6379"
+        num-cpus: "16"
+        num-gpus: "1"
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: 2
+      template:
+        metadata:
+          labels:
+            ray-node-type: worker
+            workload: gpu-p6
+        spec:
+          serviceAccountName: ray
+          nodeSelector:
+            workload: gpu-p6
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: "32Gi"
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.34.0-gpu
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests:
+                  cpu: "16"
+                  memory: "64Gi"
+                  nvidia.com/gpu: "1"
+                limits:
+                  cpu: "32"
+                  memory: "128Gi"
+                  nvidia.com/gpu: "1"
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+              # args managed via rayStartParams

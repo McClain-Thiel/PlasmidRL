@@ -1,0 +1,24 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: gpu-smoke
+  namespace: default
+spec:
+  # Submit a short GPU task to trigger GPU scale-up and then finish.
+  entrypoint: |-
+    python -c 'import os,subprocess,ray,json,socket,time; ray.init(address="auto");
+    def g():
+        import os,subprocess,socket,time
+        devs=os.environ.get("CUDA_VISIBLE_DEVICES","")
+        try:
+            smi=subprocess.check_output(["nvidia-smi","-L"], stderr=subprocess.STDOUT).decode()[:200]
+        except Exception as e:
+            smi=f"nvidia-smi not available: {e}"
+        # hold GPU for a bit so CA can provision/observe
+        time.sleep(180)
+        return {"node": socket.gethostname(), "cuda_visible_devices": devs, "nvidia_smi": smi}
+    f=ray.remote(num_gpus=1)(g); print(json.dumps(ray.get(f.remote()), indent=2))'
+  # Attach to the existing RayCluster by label.
+  clusterSelector:
+    ray.io/cluster: plasmidray
+  # TTL is omitted for existing-cluster submission to satisfy operator validation.
