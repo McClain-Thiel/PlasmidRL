@@ -29,7 +29,7 @@ spec:
               sizeLimit: "2Gi"
         containers:
           - name: ray-head
-            image: rayproject/ray:2.34.0
+            image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-cpu-uv
             imagePullPolicy: IfNotPresent
             resources:
               requests:
@@ -83,7 +83,7 @@ spec:
               effect: NoSchedule
           containers:
             - name: ray-worker
-              image: rayproject/ray:2.34.0
+              image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-cpu-uv
               imagePullPolicy: IfNotPresent
               resources:
                 requests:
@@ -125,7 +125,7 @@ spec:
               effect: NoSchedule
           containers:
             - name: ray-worker
-              image: rayproject/ray:2.34.0-gpu
+              image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-gpu-uv
               imagePullPolicy: IfNotPresent
               resources:
                 requests:

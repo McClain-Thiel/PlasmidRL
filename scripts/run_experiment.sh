@@ -52,6 +52,8 @@ if not exp:
 entrypoint = exp.get("entrypoint", "")
 ttl = int(exp.get("ttl_seconds", 0) or 0)
 env_map = exp.get("env") or {}
+working_dir = exp.get("working_dir") or ""
+pip_list = exp.get("pip") or []
 
 # Inject optional WANDB/HF envs if provided
 for k in ("WANDB_ENTITY","WANDB_PROJECT","WANDB_TAGS","WANDB_NOTES","HF_TOKEN"):
@@ -59,10 +61,17 @@ for k in ("WANDB_ENTITY","WANDB_PROJECT","WANDB_TAGS","WANDB_NOTES","HF_TOKEN"):
     if v:
         env_map[k] = v
 
-runtime_env_yaml = ""
+blocks = []
+if working_dir:
+    blocks.append(f"working_dir: {working_dir}")
+if pip_list:
+    # Expect a YAML list
+    pip_lines = "\n".join([f"  - {p}" for p in pip_list])
+    blocks.append("pip:\n" + pip_lines)
 if env_map:
-    lines = [f"  {k}: {v}" for k,v in env_map.items()]
-    runtime_env_yaml = "\n".join(lines)
+    env_lines = "\n".join([f"  {k}: {v}" for k,v in env_map.items()])
+    blocks.append("env_vars:\n" + env_lines)
+runtime_env_yaml = "\n".join(blocks)
 
 doc = f"""
 apiVersion: ray.io/v1
@@ -79,8 +88,10 @@ spec:
   ttlSecondsAfterFinished: {ttl}
 """.rstrip() + "\n"
 
+if ttl > 0:
+    doc += "  shutdownAfterJobFinishes: true\n"
 if runtime_env_yaml:
-    doc += "  runtimeEnvYAML: |\n" + runtime_env_yaml + "\n"
+    doc += "  runtimeEnvYAML: |\n" + textwrap.indent(runtime_env_yaml, '    ') + "\n"
 
 sys.stdout.write(doc)
 PY
