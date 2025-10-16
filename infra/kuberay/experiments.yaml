@@ -2,6 +2,7 @@ experiments:
   grpo-trl:
     entrypoint: |
       uv sync --frozen && uv run python -m src.runners.grpo
+    image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-cpu-uv:latest
     needs_gpu: true
     gpu_family: g6
     num_gpus: 1
@@ -14,6 +15,7 @@ experiments:
   es:
     entrypoint: |
       uv sync --frozen && uv run python -m src.runners.es
+    image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-cpu-uv:latest
     needs_gpu: false
     num_gpus: 0
     ttl_seconds: 7200
@@ -25,6 +27,7 @@ experiments:
   verl-ppo:
     entrypoint: |
       echo 'Starting VERL PPO...' && python3 -m verl.trainer.main_ppo --config-name verl_ppo
+    image: verlai/verl:base-verl0.5-cu126-cudnn9.8-torch2.7.1-fa2.7.4
     needs_gpu: true
     gpu_family: g6
     num_gpus: 1
@@ -33,3 +36,25 @@ experiments:
       WANDB_PROJECT: plasmidrl-verl-ppo
       WANDB_TAGS: '["plasmid","rl","verl","ppo"]'
       WANDB_NOTES: VERL PPO trainer
+
+  verl-grpo:
+    entrypoint: |
+      echo 'Starting VERL GRPO...' && python3 -m verl.trainer.main_ppo --config-name verl_grpo
+    image: verlai/verl:base-verl0.5-cu126-cudnn9.8-torch2.7.1-fa2.7.4
+    needs_gpu: true
+    gpu_family: g6
+    num_gpus: 1
+    ttl_seconds: 14400
+    env:
+      WANDB_PROJECT: plasmidrl-verl-grpo
+      WANDB_TAGS: '["plasmid","rl","verl","grpo"]'
+      WANDB_NOTES: VERL GRPO trainer
+
+  infer:
+    entrypoint: |
+      python -m src.eval.infer
+    image: 189709136206.dkr.ecr.us-east-1.amazonaws.com/plasmidrl-ray-cpu-uv:latest
+    needs_gpu: true
+    gpu_family: g6
+    num_gpus: 1
+    ttl_seconds: 7200
