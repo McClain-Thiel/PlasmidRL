@@ -58,6 +58,7 @@ def main():
         repetition_penalty=1.0,
         frequency_penalty=0.0,
         presence_penalty=0.0,
+        stop_token_ids=[2] #be careful here, this is hard coded to the [SEP] token for the GPT2 model
     )
     llm = LLM(model=config.sample_model)
     outputs = llm.generate(prompts, sampling_params)

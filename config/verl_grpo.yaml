@@ -38,6 +38,7 @@ actor_rollout_ref:
     enable_gradient_checkpointing: false
     override_config:
       attn_implementation: eager
+      _attn_implementation: eager
 
   actor:
     strategy: fsdp
@@ -108,7 +109,7 @@ reward_model:
 
 custom_reward_function:
   path: src/rewards/verl_reward.py
-  name: get_plasmid_reward
+  name: compute_score
 
 algorithm:
   gamma: 1.0
@@ -135,7 +136,7 @@ trainer:
   test_freq: 10                          # test every 10 steps
   critic_warmup: 0
   default_hdfs_dir: null
-  default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  default_local_dir: /s3/checkpoints/${trainer.project_name}/${trainer.experiment_name}
   resume_mode: auto
   resume_from_path: null
   remove_previous_ckpt_in_save: false

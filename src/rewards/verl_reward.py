@@ -1,294 +1,258 @@
-import logging
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
+"""
+VERL-compatible reward function using local plasmidkit annotations.
+Adapted from src/rewards/rewards.py to work with VERL's expected interface.
+"""
 
-import httpx
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from typing import Any, Iterable, List, Tuple, Optional, Dict
+
+try:
+    import plasmidkit as pk
+except ImportError:
+    pk = None
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-INFORMATICS_SERVER_URL = os.getenv("INFORMATICS_SERVER_URL", "http://server:8080")
-TIMEOUT_SECONDS = 60.0
-MAX_WORKERS = 3
-
-# Default scoring weights and requirements
-DEFAULT_WEIGHTS = {"ori": 0.30, "amr": 0.30, "mcs": 0.20, "promoter": 0.20}
-DEFAULT_GC = {"target": 0.55, "weight": 0.05, "tolerance": 0.10}
-
-# API endpoints configuration
-ENDPOINTS = [
-    {"name": "amrfinder", "path": "/amrfinder/text", "params": {"is_protein": "false", "format": "json"}},
-    {"name": "prodigal", "path": "/prodigal/text", "params": {"mode": "auto", "format": "json"}},
-    {"name": "plannotate", "path": "/plannotate/fast", "params": {}},
-]
-
-HEADERS = {
-    "Content-Type": "text/plain; charset=utf-8",
-    "Accept": "application/json, text/plain; q=0.9, */*; q=0.1",
-}
+# Toggle detailed timing logs
+try:
+    from src.config import Config
+    _REWARD_LOG_TIMINGS = bool(Config().reward_log_timings)
+except Exception:
+    _REWARD_LOG_TIMINGS = False
 
 
-def _post_to_endpoint(client: httpx.Client, endpoint: Dict, plasmid_text: str) -> Dict:
-    """Make a POST request to a single endpoint."""
-    try:
-        resp = client.post(
-            endpoint["path"],
-            params=endpoint.get("params", {}),
-            content=plasmid_text.encode("utf-8"),
-            headers=HEADERS
+def annotate_completions(completions: List[str]) -> List[Any]:
+    """Annotate a flat list of completions using threads; strips spaces from sequences."""
+    if _REWARD_LOG_TIMINGS:
+        t0 = time.perf_counter()
+    
+
+    
+    sequences = [s.replace(" ", "") for s in completions]
+    with ThreadPoolExecutor() as executor:
+        annotate = partial(pk.annotate, is_sequence=True)
+        annotations = list(executor.map(annotate, sequences))
+    
+    if _REWARD_LOG_TIMINGS:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        logger.info(f"reward.annotate n={len(completions)} time_ms={dt_ms:.2f}")
+    
+    return annotations
+
+
+def score_sequence(
+    sequence: str,
+    annotations: Any,
+    target_keywords: Iterable[str] | None = None,
+) -> float:
+    """
+    Heuristic backbone score for GRPO.
+
+    Rewards:
+      • ORI present: +20 (no penalty for multiple ORIs).
+      • Up to two highest-scoring cassettes with partial credit:
+          - promoter→CDS: order (+5) + proximity (≤100bp:+5, ≤300:+3, ≤500:+2, ≤1000:+1).
+          - CDS→terminator: order (+5) + proximity (same as above).
+          - Out-of-order legs get proximity-only partial (+≤3).
+          - +2 if CDS is a marker and promoter is within 300 bp.
+      • Standalone promoters (+1 each up to +5).
+      • Standalone terminators (+1 each up to +5).
+      • Payload (GOI) CDS anywhere: +8, plus +4 if any promoter within 500 bp.
+      • Length bonus: shorter sequences favored (linear from +15 at ≤5kb to 0 at ≥30kb).
+
+    Returns [0, 100].
+    """
+    # ---- collect features (case-insensitive 'type') ----
+    def T(x): return (x.type or "").lower()
+    feats = list(annotations)
+    oris        = [x for x in feats if T(x) in ("rep_origin", "ori", "origin_of_replication")]
+    promoters   = [x for x in feats if T(x) == "promoter"]
+    cdss        = [x for x in feats if T(x) == "cds"]
+    terminators = [x for x in feats if T(x) == "terminator"]
+
+    # ---- small helpers ----
+    def strand(x): return getattr(x, "strand", "+")
+    def start(x):  return int(getattr(x, "start", 0))
+    def end(x):    return int(getattr(x, "end", 0))
+    def role(x):   return (getattr(x, "evidence", {}) or {}).get("role", "").lower()
+
+    def in_order_same_strand(a, b) -> bool:
+        if strand(a) != strand(b): return False
+        if strand(a) == "+": return start(a) <= start(b)
+        else:                return end(a)   >= end(b)
+
+    def distance(a, b) -> int:
+        if end(a) < start(b): return start(b) - end(a)
+        if end(b) < start(a): return start(a) - end(b)
+        return 0  # overlapping/adjacent
+
+    def prox_points(d: int, max_pts: int = 5) -> int:
+        if d <= 100:  return max_pts
+        if d <= 300:  return max_pts - 2   # 3
+        if d <= 500:  return max_pts - 3   # 2
+        if d <= 1000: return 1
+        return 0
+
+    # ---- ORI scoring ----
+    score = 0.0
+    if len(oris) >= 1:
+        score += 20.0  # Fixed 20 points for having an ORI (no penalty for multiple)
+
+    # ---- Cassette scoring (incl. out-of-order partials) ----
+    def best_cassettes() -> List[Tuple[Any, Any, Any, int]]:
+        triples = []
+        for p in promoters:
+            cds_same = [c for c in cdss if strand(c) == strand(p)]
+            if not cds_same: continue
+            cds_same.sort(key=lambda c: distance(p, c))
+            c = cds_same[0]
+
+            term_cands = [t for t in terminators if strand(t) == strand(c)]
+            # prefer ordered downstream terminators, but allow out-of-order partial credit
+            term_cands.sort(key=lambda t: distance(c, t))
+            t = term_cands[0] if term_cands else None
+
+            pts = 0
+            # promoter -> CDS
+            if in_order_same_strand(p, c):
+                pts += 5
+                pts += prox_points(distance(p, c), 5)
+            else:
+                pts += min(3, prox_points(distance(p, c), 5))  # out-of-order partial
+
+            # CDS -> terminator
+            if t is not None:
+                if in_order_same_strand(c, t):
+                    pts += 5
+                    pts += prox_points(distance(c, t), 5)
+                else:
+                    pts += min(3, prox_points(distance(c, t), 5))  # out-of-order partial
+
+            if role(c) == "marker" and distance(p, c) <= 300:
+                pts += 2
+
+            triples.append((p, c, t, pts))
+        triples.sort(key=lambda x: x[3], reverse=True)
+        return triples[:2]
+
+    for (_, _, _, pts) in best_cassettes():
+        score += float(min(20, pts))
+
+    # ---- Standalone promoter & terminator credit ----
+    if promoters:
+        score += float(min(5.0, 1.0 * len(promoters)))   # +1 each up to +5
+    if terminators:
+        score += float(min(5.0, 1.0 * len(terminators))) # +1 each up to +5
+
+    # ---- Payload (GOI) anywhere ----
+    target_keywords = [k.lower() for k in (target_keywords or [])]
+    def is_payload(c) -> bool:
+        r = role(c)
+        id_l = (getattr(c, "id", "") or "").lower()
+        return r in {"payload", "goi", "reporter"} or (target_keywords and any(k in id_l for k in target_keywords))
+
+    payloads = [c for c in cdss if is_payload(c)]
+    if payloads:
+        score += 8.0
+        # +4 if any promoter within 500 bp (either direction; same strand preferred implicitly by proximity)
+        if any(distance(p, c) <= 500 for c in payloads for p in promoters):
+            score += 4.0
+
+    # ---- Length reward: shorter sequences get bonus ----
+    L = max(0, len(sequence or ""))
+
+    def length_reward(L: int) -> float:
+        # Linear reward from 15 pts at 5kb down to 0 pts at 30kb
+        # Sequences > 30kb get 0 reward
+        # Sequences <= 5kb get max 15 pts
+        if L >= 30000:
+            return 0.0
+        if L <= 5000:
+            return 15.0
+        # Linear interpolation between 5kb and 30kb
+        return 15.0 * (30000 - L) / (30000 - 5000)
+
+    score += length_reward(L)
+
+    # ---- Clamp ----
+    return float(max(0.0, min(100.0, score)))
+
+
+def extract_dna_sequence(solution_str: str) -> str:
+    """
+    Extract DNA sequence from the generated solution string.
+    Assumes the model generates DNA sequences (ACGT characters).
+    Strips whitespace and non-ACGT characters.
+    """
+    if not solution_str:
+        return ""
+    
+    # Remove whitespace
+    seq = solution_str.strip().replace(" ", "").replace("\n", "").replace("\r", "")
+    
+    # Filter to only valid DNA bases (case-insensitive)
+    valid_bases = set("ACGTacgt")
+    seq = "".join(c for c in seq if c in valid_bases)
+    
+    return seq.upper()
+
+
+def compute_score(
+    data_source: Optional[str],
+    solution_str: Optional[str],
+    ground_truth: Optional[str],
+    extra_info: Optional[Dict] = None,
+) -> float:
+    """
+    VERL-compatible reward function.
+    
+    This is the main entry point called by VERL's RewardManager.
+    
+    Args:
+        data_source: Dataset name (unused in this implementation)
+        solution_str: Generated text from the model (should contain DNA sequence)
+        ground_truth: Ground truth from the dataset (unused in this implementation)
+        extra_info: Additional info dict (unused in this implementation)
+    
+    Returns:
+        float: Reward score, normalized to [0, 1] range (from 0-100 internal score)
+    """
+    if _REWARD_LOG_TIMINGS:
+        t0 = time.perf_counter()
+    
+    # Extract DNA sequence from solution
+    sequence = extract_dna_sequence(solution_str or "")
+    
+    if not sequence:
+        logger.warning("Empty or invalid DNA sequence in solution_str")
+        return 0.0
+    
+
+    annotations = pk.annotate(sequence, is_sequence=True)
+        
+        # Score the sequence (returns 0-100)
+    raw_score = score_sequence(sequence, annotations)
+        
+        # Normalize to [0, 1] for VERL
+    normalized_score = raw_score / 100.0
+        
+    if _REWARD_LOG_TIMINGS:
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        logger.info(
+                f"reward.compute_score seq_len={len(sequence)} "
+                f"raw_score={raw_score:.2f} normalized={normalized_score:.4f} "
+                f"time_ms={dt_ms:.2f}"
         )
         
-        success = (resp.status_code == 200)
-        if not success:
-            logger.warning(
-                "[%s] Request failed with status %s: %s",
-                endpoint["name"], resp.status_code, resp.text[:200]
-            )
+    return float(normalized_score)
         
-        try:
-            response_data = resp.json()
-        except Exception:
-            if success:
-                logger.warning("[%s] Failed to parse JSON response", endpoint["name"])
-            response_data = {}
-            
-        return {
-            "status": success,
-            "name": endpoint["name"],
-            "response": response_data
-        }
-        
-    except Exception as e:
-        logger.error("[%s] Request failed: %s", endpoint["name"], e)
-        return {
-            "status": False,
-            "name": endpoint["name"],
-            "response": {}
-        }
 
 
-def _make_parallel_requests(plasmid_text: str) -> List[Dict]:
-    """Make parallel requests to all endpoints."""
-    if not plasmid_text.strip():
-        return []
-    
-    results = []
-    
-    with httpx.Client(
-        base_url=INFORMATICS_SERVER_URL,
-        timeout=httpx.Timeout(TIMEOUT_SECONDS),
-        follow_redirects=True
-    ) as client:
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # Submit all requests
-            future_to_endpoint = {
-                executor.submit(_post_to_endpoint, client, endpoint, plasmid_text): endpoint
-                for endpoint in ENDPOINTS
-            }
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_endpoint):
-                try:
-                    result = future.result()
-                    results.append(result)
-                except Exception as e:
-                    endpoint = future_to_endpoint[future]
-                    logger.error("[%s] Future failed: %s", endpoint["name"], e)
-                    results.append({
-                        "status": False,
-                        "name": endpoint["name"],
-                        "response": {}
-                    })
-    
-    return results
 
-
-def _contains_any(text: str, needles: Optional[List[str]]) -> bool:
-    """Check if text contains any of the needle strings (case-insensitive)."""
-    if not needles:
-        return False
-    text_lower = str(text or "").lower()
-    return any(str(needle or "").lower() in text_lower for needle in needles)
-
-
-def _best_percent_identity(entries: List[Dict]) -> float:
-    """Extract the best percent identity from a list of entries."""
-    best = 0.0
-    for entry in entries:
-        try:
-            pident = float(entry.get("pident", 100.0)) / 100.0
-            best = max(best, max(0.0, min(1.0, pident)))
-        except (ValueError, TypeError):
-            continue
-    return best if best > 0 else 1.0
-
-
-def _score_plannotate_features(plannotate_data: List[Dict]) -> tuple[bool, bool, bool, float, float, float]:
-    """Score plannotate features for ORI, MCS, and promoter presence."""
-    ori_present = mcs_present = prom_present = False
-    ori_pident = mcs_pident = prom_pident = 1.0
-    
-    if not isinstance(plannotate_data, list):
-        return ori_present, mcs_present, prom_present, ori_pident, mcs_pident, prom_pident
-    
-    ori_entries, mcs_entries, prom_entries = [], [], []
-    
-    for feat in plannotate_data:
-        if not isinstance(feat, dict):
-            continue
-            
-        name = str(feat.get("Feature", ""))
-        desc = str(feat.get("Description", ""))
-        typ = str(feat.get("Type", ""))
-        text = f"{name} {desc} {typ}"
-        
-        # Check for ORI
-        if typ.lower() == "rep_origin" or _contains_any(text, ["ori", "colE1", "pmb1", "pbr322", "puc"]):
-            ori_entries.append(feat)
-            
-        # Check for MCS
-        if _contains_any(text, ["mcs", "multiple cloning site"]):
-            mcs_entries.append(feat)
-            
-        # Check for promoter
-        if typ.lower() == "promoter" or _contains_any(text, ["promoter"]):
-            prom_entries.append(feat)
-    
-    if ori_entries:
-        ori_present = True
-        ori_pident = _best_percent_identity(ori_entries)
-    if mcs_entries:
-        mcs_present = True
-        mcs_pident = _best_percent_identity(mcs_entries)
-    if prom_entries:
-        prom_present = True
-        prom_pident = _best_percent_identity(prom_entries)
-    
-    return ori_present, mcs_present, prom_present, ori_pident, mcs_pident, prom_pident
-
-
-def _score_amr_genes(amr_data: Dict) -> tuple[bool, float]:
-    """Score AMR genes from amrfinder data."""
-    amr_present = False
-    amr_pident = 1.0
-    
-    if not isinstance(amr_data, dict):
-        return amr_present, amr_pident
-    
-    genes = amr_data.get("genes", [])
-    if not genes:
-        return amr_present, amr_pident
-    
-    amr_present = True
-    best_identity = 1.0
-    
-    for gene in genes:
-        if not isinstance(gene, dict):
-            continue
-        try:
-            pident = float(gene.get("percent_identity_to_reference", 100.0)) / 100.0
-            best_identity = max(best_identity, max(0.0, min(1.0, pident)))
-        except (ValueError, TypeError):
-            continue
-    
-    amr_pident = best_identity
-    return amr_present, amr_pident
-
-
-def _calculate_gc_bonus(prodigal_data: Dict) -> float:
-    """Calculate GC content bonus from prodigal data."""
-    if not isinstance(prodigal_data, dict):
-        return 0.0
-    
-    metadata = prodigal_data.get("metadata", {})
-    if not isinstance(metadata, dict):
-        return 0.0
-    
-    gc_raw = metadata.get("model_gc_cont") or metadata.get("gc_cont")
-    if gc_raw is None:
-        return 0.0
-    
-    try:
-        gc_str = str(gc_raw).strip().replace("%", "")
-        gc_value = float(gc_str)
-        gc_percent = gc_value / 100.0 if "%" in str(gc_raw) or gc_value > 1.0 else gc_value
-        
-        target = DEFAULT_GC["target"]
-        tolerance = DEFAULT_GC["tolerance"]
-        weight = DEFAULT_GC["weight"]
-        
-        distance = abs(gc_percent - target)
-        normalized = max(0.0, 1.0 - (distance / tolerance))
-        
-        return weight * normalized
-        
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def _combine_results(api_results: List[Dict]) -> float:
-    """Combine API results into a single reward score."""
-    # Organize results by endpoint name
-    by_name = {}
-    successful_endpoints = []
-    failed_endpoints = []
-    
-    for result in api_results:
-        endpoint_name = result.get("name", "unknown")
-        if result.get("status", False):
-            by_name[endpoint_name] = result.get("response", {})
-            successful_endpoints.append(endpoint_name)
-        else:
-            failed_endpoints.append(endpoint_name)
-    
-    logger.info("API call results: successful=%s, failed=%s", successful_endpoints, failed_endpoints)
-    
-    # Extract data from each endpoint
-    plannotate_data = by_name.get("plannotate", [])
-    amr_data = by_name.get("amrfinder", {})
-    prodigal_data = by_name.get("prodigal", {})
-    
-    # Score each component
-    ori_present, mcs_present, prom_present, ori_pident, mcs_pident, prom_pident = \
-        _score_plannotate_features(plannotate_data)
-    
-    amr_present, amr_pident = _score_amr_genes(amr_data)
-    
-    # Calculate individual component scores
-    weights = DEFAULT_WEIGHTS
-    ori_score = weights["ori"] * ori_pident if ori_present else 0.0
-    amr_score = weights["amr"] * amr_pident if amr_present else 0.0
-    mcs_score = weights["mcs"] * mcs_pident if mcs_present else 0.0
-    prom_score = weights["promoter"] * prom_pident if prom_present else 0.0
-    
-    # Main score (sum of components)
-    main_score = ori_score + amr_score + mcs_score + prom_score
-    main_score = min(main_score, 1.0)  # Cap at 1.0
-    
-    # Add GC content bonus
-    gc_bonus = _calculate_gc_bonus(prodigal_data)
-    
-    total_score = main_score + gc_bonus
-    
-    # Log detailed component breakdown
-    logger.info("=== REWARD COMPONENT BREAKDOWN ===")
-    logger.info("ORI (origin):     present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
-                ori_present, ori_pident * 100, ori_score, weights["ori"])
-    logger.info("AMR (resistance): present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
-                amr_present, amr_pident * 100, amr_score, weights["amr"])
-    logger.info("MCS (cloning):    present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
-                mcs_present, mcs_pident * 100, mcs_score, weights["mcs"])
-    logger.info("Promoter:         present=%s, identity=%.2f%%, score=%.4f (weight=%.2f)", 
-                prom_present, prom_pident * 100, prom_score, weights["promoter"])
-    logger.info("GC content bonus: %.4f", gc_bonus)
-    logger.info("Main score:       %.4f (capped at 1.0)", main_score)
-    logger.info("TOTAL REWARD:     %.4f", total_score)
-    logger.info("==================================")
-    
-    return float(total_score)
-
-
+# Backward compatibility alias
 def get_plasmid_reward(
     plasmid: Optional[str] = None,
     *,
@@ -299,65 +263,8 @@ def get_plasmid_reward(
     **kwargs,
 ) -> float:
     """
-    Calculate reward for a plasmid sequence by querying informatics endpoints.
-    
-    Args:
-        plasmid: DNA sequence string (preferred)
-        solution_str: Alternative field where VERL passes the generated text
-        
-    Returns:
-        float: Reward score between 0.0 and ~1.05 (including GC bonus)
+    Backward compatibility wrapper.
+    Delegates to compute_score.
     """
-    if plasmid is None or not str(plasmid).strip():
-        plasmid = solution_str or ""
-
-    if not plasmid.strip():
-        logger.warning("Empty plasmid sequence provided")
-        return 0.0
-    
-    sequence = plasmid.strip()
-    
-    # Log input sequence info
-    logger.info("=== EVALUATING PLASMID SEQUENCE ===")
-    logger.info("Sequence length: %d bp", len(sequence))
-    logger.info("Sequence preview: %s%s", 
-                sequence[:100], "..." if len(sequence) > 100 else "")
-    logger.info("Querying informatics server: %s", INFORMATICS_SERVER_URL)
-    
-    try:
-        # Make parallel API calls
-        api_results = _make_parallel_requests(sequence)
-        
-        if not api_results:
-            logger.warning("No successful API responses - returning 0.0")
-            return 0.0
-        
-        # Combine results into final score
-        reward = _combine_results(api_results)
-        
-        logger.info("=== FINAL RESULT ===")
-        logger.info("Plasmid reward: %.4f", reward)
-        logger.info("==================")
-        
-        return reward
-        
-    except Exception as e:
-        logger.error("Failed to calculate plasmid reward: %s", e)
-        logger.info("=== FINAL RESULT ===")
-        logger.info("Plasmid reward: 0.0000 (error)")
-        logger.info("==================")
-        return 0.0
-
-
-def compute_score(
-    data_source: Optional[str],
-    solution_str: Optional[str],
-    ground_truth: Optional[str],
-    extra_info: Optional[Dict] = None,
-):
-    """VERL-expected reward signature.
-
-    Delegates to get_plasmid_reward using the generated solution string.
-    You may incorporate data_source/ground_truth/extra_info if needed.
-    """
-    return get_plasmid_reward(solution_str=solution_str, data_source=data_source, ground_truth=ground_truth, extra_info=extra_info)
+    seq = plasmid or solution_str or ""
+    return compute_score(data_source, seq, ground_truth, extra_info)
