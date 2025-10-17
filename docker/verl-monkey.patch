@@ -1,0 +1,28 @@
+--- a/verl/models/transformers/monkey_patch.py
++++ b/verl/models/transformers/monkey_patch.py
+@@ -221,10 +221,19 @@ def apply_monkey_patch(
+     module = sys.modules[model.__module__]
+
+     try:
+-        num_attention_heads, num_key_value_heads = model.config.num_attention_heads, model.config.num_key_value_heads
++        # Try standard attributes first
++        num_attention_heads = model.config.num_attention_heads
++        num_key_value_heads = model.config.num_key_value_heads
+     except AttributeError:
+-        num_attention_heads, num_key_value_heads = (
+-            model.config.text_config.num_attention_heads,
+-            model.config.text_config.num_key_value_heads,
+-        )
++        try:
++            # Try text_config for VLMs
++            num_attention_heads = model.config.text_config.num_attention_heads
++            num_key_value_heads = model.config.text_config.num_key_value_heads
++        except AttributeError:
++            # Fallback for GPT2-style configs
++            num_attention_heads = getattr(model.config, 'n_head', None)
++            # GPT2 doesn't have separate key/value heads (MHA not MQA/GQA)
++            num_key_value_heads = num_attention_heads
++            if num_attention_heads is None:
++                raise AttributeError(f"Cannot determine number of attention heads for {model.config.__class__.__name__}")
+
+     assert num_attention_heads % ulysses_sp_size == 0, (

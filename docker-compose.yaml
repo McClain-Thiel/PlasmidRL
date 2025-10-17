@@ -67,6 +67,13 @@ services:
       - ./:/mcclain
       - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
       - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - WANDB_ENTITY=mcclain
       - WANDB_PROJECT=plasmidrl-verl-ppo
@@ -90,6 +97,13 @@ services:
       - ./:/mcclain
       - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
       - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - WANDB_ENTITY=mcclain
       - WANDB_PROJECT=plasmidrl-verl-grpo

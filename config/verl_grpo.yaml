@@ -5,8 +5,8 @@ defaults:
 
 data:
   tokenizer: null
-  train_files: data/verl/train.parquet
-  val_files: data/verl/test.parquet
+  train_files: data/train.parquet
+  val_files: data/test.parquet
   prompt_key: prompt
   max_prompt_length: 1024
   max_response_length: 256
@@ -49,7 +49,6 @@ actor_rollout_ref:
     clip_ratio: 0.2
     entropy_coeff: 0.0
     use_kl_loss: false             # KL via reward shaping for GRPO
-    tis_imp_ratio_cap: -1
     use_torch_compile: false        # disabled to save memory
     kl_loss_coef: 0.0
     kl_loss_type: low_var_kl

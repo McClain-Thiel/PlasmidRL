@@ -27,6 +27,7 @@ dependencies = [
     "traitlets>=5.14.3",
     "transformers>=4.56.1",
     "trl[vllm]>=0.22.2",
+    "vllm>=0.11.0",
     "wandb>=0.21.3",
 ]
 
