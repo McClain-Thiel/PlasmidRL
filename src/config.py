@@ -14,36 +14,35 @@ class Config(BaseSettings):
     # Additional environment variables
     cuda_visible_devices: str = "all"
 
+    #huggingface configuration
+    huggingface_token: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=AliasChoices("hf_token", "HF_TOKEN", "HUGGINGFACE_TOKEN"),
+    )
+
+
     #this is the GFP cassette
     default_query: str = "tttacggctagctcagtcctaggtatagtgctagcTACTagagaaagaggagaaatactaAATGatgcgtaaaggagaagaacttttcactggagttgtcccaattcttgttgaattagatggtgatgttaatgggcacaaattttctgtcagtggagagggtgaaggtgatgcaacatacggaaaacttacccttaaatttatttgcactactggaaaactacctgttccatggccaacacttgtcactactttcggttatggtgttcaatgctttgcgagatacccagatcatatgaaacagcatgactttttcaagagtgccatgcccgaaggttatgtacaggaaagaactatatttttcaaagatgacgggaactacaagacacgtgctgaagtcaagtttgaaggtgatacccttgttaatagaatcgagttaaaaggtattgattttaaagaagatggaaacattcttggacacaaattggaatacaactataactcacacaatgtatacatcatggcagacaaacaaaagaatggaatcaaagttaacttcaaaattagacacaacattgaagatggaagcgttcaactagcagaccattatcaacaaaatactccaattggcgatggccctgtccttttaccagacaaccattacctgtccacacaatctgccctttcgaaagatcccaacgaaaagagagatcacatggtccttcttgagtttgtaacagctgttgtttgtcggtgaacgctctctactagagtcacactggctcaccttcgggtgggcctttctgcgtttata".upper()
     
     # Weights & Biases configuration
     wandb_api_key: Optional[SecretStr] = None
-    wandb_entity: str = "mcclain"  # Use your personal/team entity instead of organization
-    wandb_project: str = "plasmidrl"
-    wandb_run_name: Optional[str] = None  # If None, wandb will auto-generate
-    wandb_tags: list[str] = ["plasmid", "rl", "grpo"]
-    wandb_notes: str = "GRPO training for plasmid design optimization"
+    wandb_entity: str = "ucl-cssb" 
+    wandb_project: str = "PlasmidRL"
 
-    # RL Training configuration
-    K: int = 1  # number of samples per prompt to compute MC advantage
-    num_iters: int = 200  
-    lr: float = 1e-5
-    weight_decay: float = 0.0
-    max_grad_norm: float = 1.0
-    max_new_tokens: int = 512
-    dialog_turns_per_batch: int = 16
-    reward_max_workers: int = 16
-    reward_log_timings: bool = False
-    log_level: str = "INFO"
-    advantage_verbose: bool = False
 
     # Training logging configuration
     log_interval: int = 2  # How often to print progress
     checkpoint_interval: int = 5  # How often to save checkpoints
+
+    #sample generation configuration
+    sample_model: str = "McClain/plasmid-rl-grpo"
     
     # Replay buffer configuration
     replay_buffer_size: int = 10_000
+
+    s3_bucket: str = "s3://phd-research-storage-1758274488/"
+    runs_path: str = "runs/"
+    infered_path: str = "infered/"
 
     model_config = {
         "env_file": ".env",

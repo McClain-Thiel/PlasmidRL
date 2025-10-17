@@ -95,6 +95,12 @@ services:
         echo 'Starting VERL GRPO...' && python3 -m verl.trainer.main_ppo --config-name verl_grpo
       "
     
+  infer:
+    <<: *common
+    command: >
+      bash -lc "
+        uv sync --frozen && uv run python -m src.runners.infer
+      "
 
   # Optional: evaluation CLI if present
   eval:
