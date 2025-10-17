@@ -1,3 +1,5 @@
+
+# this is the yaml version of a function or variable we can reuse
 x-common: &common
   build:
     context: .
@@ -15,6 +17,9 @@ x-common: &common
           - driver: nvidia
             count: all
             capabilities: [gpu]
+
+x-s3: &s3mount
+  - /mnt/s3/phd-research-storage-1758274488:/s3:rw
 
 services:
   # Interactive shell for debugging
@@ -61,6 +66,7 @@ services:
     volumes:
       - ./:/mcclain
       - ./config/verl_ppo.yaml:/opt/verl/verl/trainer/config/verl_ppo.yaml:ro
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     environment:
       - WANDB_ENTITY=mcclain
       - WANDB_PROJECT=plasmidrl-verl-ppo
@@ -83,6 +89,7 @@ services:
     volumes:
       - ./:/mcclain
       - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     environment:
       - WANDB_ENTITY=mcclain
       - WANDB_PROJECT=plasmidrl-verl-grpo
@@ -99,7 +106,7 @@ services:
     <<: *common
     command: >
       bash -lc "
-        uv sync --frozen && uv run python -m src.runners.infer
+        uv sync --frozen && uv run python -m src.runners.generate_samples
       "
 
   # Optional: evaluation CLI if present
