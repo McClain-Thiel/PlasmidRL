@@ -1,6 +1,35 @@
 PlasmidRL — Experiments and Runners
 
-This repository collects several training/optimization entrypoints for plasmid-related RL experiments. All jobs run via Docker Compose and log to separate Weights & Biases (W&B) projects with clear tags and notes.
+This repository collects several entrypoints for plasmid-related RL experiments. There are two ways to interact with the code 1.) run via Docker Compose (preffered) and  2.) uv cli. 
+
+## Docker Compose Entrypoints
+When using docker entry points all config is done in config files (config.py or ~/config/*.yaml)
+
+Long running processes are kicked off with `docker compose up {service_name}`
+
+### Services
+
+ * dev
+  * simple interactive bash shell just for debugging
+
+ * grpo-trl
+  * runs src/runners/grpo. GRPO implemented using huggingface TRL library
+
+ * es
+  * evoutionary strategy from that one paper. runs src/runners/es.py
+
+ * verl-ppo
+  * uses the VERL docker container to run PPO. No code just the config file in config/verl_ppo.yaml
+  * docker compose env var args include [WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS, WANDB_NOTES, HF_TOKEN, WANDB_API_KEY]
+
+ * verl-grpo
+   * uses the VERL docker container to run GRPO. No code just the config file in config/verl_ppo.yaml
+  * docker compose env var args include [WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS, WANDB_NOTES, HF_TOKEN, WANDB_API_KEY]
+
+ * infer
+  * takes a model defined in config.py (sample_model) and prompts it for samples then uploads to s3. 
+
+
 
 Prerequisites
 - NVIDIA GPU host with Docker + Compose

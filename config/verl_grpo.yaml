@@ -73,7 +73,7 @@ actor_rollout_ref:
     do_sample: true
     top_p: 0.95
     temperature: 0.9
-    n: 8                            # reduced from 32 to reduce memory usage
+    n: 8                       
     tensor_model_parallel_size: 1
     enforce_eager: true
     free_cache_engine: false
@@ -82,7 +82,7 @@ actor_rollout_ref:
     max_num_seqs: 16                # reduced from 32
     enable_chunked_prefill: false
     response_length: ${data.max_response_length}
-    log_prob_micro_batch_size_per_gpu: 2  # reduced from 4
+    log_prob_micro_batch_size_per_gpu: 4  # reduced from 4
     calculate_log_probs: false
     val_kwargs:
       do_sample: false
@@ -118,7 +118,7 @@ algorithm:
   use_kl_in_reward: true          # KL shaping instead of actor loss
   kl_penalty: kl
   kl_ctrl:
-    type: fixed
+    type: adaptive
     kl_coef: 0.001
     horizon: 10000
     target_kl: 0.1
@@ -126,7 +126,7 @@ algorithm:
 trainer:
   total_epochs: 100                      # increased from 10 for longer training
   project_name: verl-grpo
-  experiment_name: minimal
+  experiment_name: fresh-start-20251017-1900
   logger: ['console', 'wandb']
   log_val_generations: 0
   nnodes: 1
@@ -137,7 +137,7 @@ trainer:
   critic_warmup: 0
   default_hdfs_dir: null
   default_local_dir: /s3/checkpoints/${trainer.project_name}/${trainer.experiment_name}
-  resume_mode: auto
+  resume_mode: disable                   # explicitly set to disable for fresh start
   resume_from_path: null
   remove_previous_ckpt_in_save: false
   del_local_ckpt_after_load: false
@@ -145,6 +145,6 @@ trainer:
   wandb:
     entity: mcclain
     project: verl-grpo
-    name: plasmidgpt-dna-grpo-long
+    name: plasmidgpt-dna-grpo-fresh-start-20251017-1900
     tags: ['plasmidgpt-dna', 'verl', 'grpo', 'rl', 'long-run']
     notes: 'Extended GRPO training on plasmidgpt-dna for plasmid design'

@@ -35,12 +35,13 @@ class Config(BaseSettings):
     checkpoint_interval: int = 5  # How often to save checkpoints
 
     #sample generation configuration
-    sample_model: str = "McClain/plasmid-rl-grpo"
+    sample_model: str = "McClain/grpo-6000"
     
     # Replay buffer configuration
     replay_buffer_size: int = 10_000
 
     s3_bucket: str = "s3://phd-research-storage-1758274488/"
+    region_name: str = "us-east-1"
     runs_path: str = "runs/"
     infered_path: str = "infered/"
 
