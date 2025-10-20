@@ -9,24 +9,24 @@ Long running processes are kicked off with `docker compose up {service_name}`
 
 ### Services
 
- * dev
+* dev
   * simple interactive bash shell just for debugging
 
- * grpo-trl
+* grpo-trl
   * runs src/runners/grpo. GRPO implemented using huggingface TRL library
 
- * es
+* es
   * evoutionary strategy from that one paper. runs src/runners/es.py
 
- * verl-ppo
+* verl-ppo
   * uses the VERL docker container to run PPO. No code just the config file in config/verl_ppo.yaml
   * docker compose env var args include [WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS, WANDB_NOTES, HF_TOKEN, WANDB_API_KEY]
 
- * verl-grpo
-   * uses the VERL docker container to run GRPO. No code just the config file in config/verl_ppo.yaml
+* verl-grpo
+  * uses the VERL docker container to run GRPO. No code just the config file in config/verl_ppo.yaml
   * docker compose env var args include [WANDB_ENTITY, WANDB_PROJECT, WANDB_TAGS, WANDB_NOTES, HF_TOKEN, WANDB_API_KEY]
 
- * infer
+* infer
   * takes a model defined in config.py (sample_model) and prompts it for samples then uploads to s3. 
 
 
