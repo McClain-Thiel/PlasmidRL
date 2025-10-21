@@ -1,6 +1,6 @@
 # configs/grpo_minimal.yaml
 defaults:
-  - ppo_trainer        # using PPO trainer harness; GRPO is selected via algorithm.adv_estimator
+  - ppo_trainer
   - _self_
 
 data:
@@ -9,8 +9,8 @@ data:
   val_files: data/test.parquet
   prompt_key: prompt
   max_prompt_length: 1024
-  max_response_length: 256
-  train_batch_size: 2             # reduced from 4 to reduce memory usage
+  max_response_length: 256            # shorter early; bump to 256 once stable
+  train_batch_size: 2
   trust_remote_code: true
   return_raw_input_ids: true
   return_raw_chat: true
@@ -32,6 +32,7 @@ data:
 
 actor_rollout_ref:
   hybrid_engine: true
+
   model:
     path: McClain/plasmidgpt-addgene-gpt2
     trust_remote_code: true
@@ -42,55 +43,65 @@ actor_rollout_ref:
 
   actor:
     strategy: fsdp
-    ppo_mini_batch_size: 2          # reduced from 4
+    ppo_mini_batch_size: 2
     ppo_micro_batch_size_per_gpu: 1
     use_dynamic_bsz: false
-    ppo_max_token_len_per_gpu: 2048 # reduced from 4096
-    grad_clip: 1.0
+    ppo_max_token_len_per_gpu: 2048
+    grad_clip: 0.5
     clip_ratio: 0.2
     entropy_coeff: 0.0
-    use_kl_loss: false             # KL via reward shaping for GRPO
-    use_torch_compile: false        # disabled to save memory
-    kl_loss_coef: 0.0
+
+    # GRPO: KL as a LOSS term (not in reward)
+    use_kl_loss: true
+    kl_loss_coef: 0.001            # tune 5e-4 – 2e-3
     kl_loss_type: low_var_kl
+    loss_agg_mode: token-mean
+
+    use_torch_compile: false
     ppo_epochs: 1
+
     optim:
-      lr: 0.5e-5
+      lr: 3e-6                      # a bit more conservative to start
       lr_warmup_steps_ratio: 0.0
       warmup_style: constant
       total_training_steps: -1
+
     fsdp_config:
       wrap_policy:
         min_num_params: 0
       param_offload: false
       optimizer_offload: false
 
+  # Explicit, frozen reference model for KL
   ref:
+    model:
+      path: McClain/plasmidgpt-addgene-gpt2
+      trust_remote_code: true
     log_prob_micro_batch_size_per_gpu: 4
 
   rollout:
     name: vllm
     do_sample: true
-    top_p: 0.95
-    temperature: 0.9
-    n: 8                       
+    top_p: 0.90
+    temperature: 0.80
+    n: 9
     tensor_model_parallel_size: 1
     enforce_eager: true
     free_cache_engine: false
-    gpu_memory_utilization: 0.15    # further reduced to save memory
-    max_num_batched_tokens: 128     # reduced from 256
-    max_num_seqs: 16                # reduced from 32
+    gpu_memory_utilization: 0.15
+    max_num_batched_tokens: 128
+    max_num_seqs: 16
     enable_chunked_prefill: false
     response_length: ${data.max_response_length}
-    log_prob_micro_batch_size_per_gpu: 4  # reduced from 4
-    calculate_log_probs: false
+    log_prob_micro_batch_size_per_gpu: 4
+    calculate_log_probs: false        # not needed; loss path recomputes
     val_kwargs:
       do_sample: false
       temperature: 0.0
       n: 1
 
 critic:
-  enable: false                      # GRPO doesn't use a critic
+  enable: false
   model:
     path: McClain/plasmidgpt-addgene-gpt2
     trust_remote_code: true
@@ -114,30 +125,25 @@ custom_reward_function:
 algorithm:
   gamma: 1.0
   lam: 1.0
-  adv_estimator: grpo             
-  use_kl_in_reward: true          
-  kl_penalty: kl
-  kl_ctrl:
-    type: adaptive
-    kl_coef: 0.01
-    horizon: 3000
-    target_kl: 0.025
+  adv_estimator: grpo
+  use_kl_in_reward: false            # << GRPO uses KL loss, not in-reward
+  # (remove kl_penalty / kl_ctrl entirely)
 
 trainer:
-  total_epochs: 100                      # increased from 10 for longer training
+  total_epochs: 20
   project_name: verl-grpo
   experiment_name: grpo-with-markers-2
   logger: ['console', 'wandb']
   log_val_generations: 0
   nnodes: 1
   n_gpus_per_node: 1
-  save_freq: 10                          # save checkpoints every 10 steps
+  save_freq: 10
   val_before_train: false
-  test_freq: 10                          # test every 10 steps
+  test_freq: 10
   critic_warmup: 0
   default_hdfs_dir: null
   default_local_dir: /s3/checkpoints/${trainer.project_name}/${trainer.experiment_name}
-  resume_mode: disable                   # explicitly set to disable for fresh start
+  resume_mode: disable
   resume_from_path: null
   remove_previous_ckpt_in_save: false
   del_local_ckpt_after_load: false
@@ -145,6 +151,6 @@ trainer:
   wandb:
     entity: mcclain
     project: verl-grpo
-    name: plasmidgpt-dna-grpo-long-20251017-1900
+    name: plasmidgpt-dna-grpo-better-loggings
     tags: ['plasmidgpt-dna', 'verl', 'grpo', 'rl', 'long-run']
     notes: 'Extended GRPO training on plasmidgpt-dna for plasmid design'

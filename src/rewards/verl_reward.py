@@ -14,6 +14,11 @@ try:
 except ImportError:
     pk = None
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 logger = logging.getLogger(__name__)
 
 # Toggle detailed timing logs
@@ -47,7 +52,8 @@ def score_sequence(
     sequence: str,
     annotations: Any,
     target_keywords: Iterable[str] | None = None,
-) -> float:
+    return_components: bool = False,
+) -> float | Tuple[float, Dict[str, float]]:
     """
     Heuristic backbone score for GRPO.
 
@@ -64,7 +70,15 @@ def score_sequence(
       • Payload (GOI) CDS anywhere: +8, plus +4 if any promoter within 500 bp.
       • Length bonus: shorter sequences favored (linear from +10 at ≤5kb to 0 at ≥30kb).
 
-    Returns [0, 100].
+    Args:
+        sequence: DNA sequence to score
+        annotations: Plasmidkit annotations
+        target_keywords: Keywords for identifying payload genes
+        return_components: If True, return (score, components_dict)
+
+    Returns:
+        float score [0, 100] if return_components=False
+        Tuple[float, Dict[str, float]] if return_components=True
     """
     # ---- collect features (case-insensitive 'type') ----
     def T(x): return (x.type or "").lower()
@@ -100,14 +114,24 @@ def score_sequence(
 
     # ---- ORI scoring ----
     score = 0.0
+    components = {}
+    
+    ori_score = 0.0
     if len(oris) >= 1:
-        score += 20.0  # +20 for first ORI
+        ori_score += 20.0  # +20 for first ORI
         if len(oris) > 1:
-            score -= 10.0 * (len(oris) - 1)  # -10 for each additional ORI
+            ori_score -= 10.0 * (len(oris) - 1)  # -10 for each additional ORI
+    score += ori_score
+    components["ori"] = ori_score
+    components["ori_count"] = float(len(oris))
     
     # ---- Marker bonus ----
+    marker_score = 0.0
     if len(markers) >= 1:
-        score += 10.0  # +10 for having at least one marker
+        marker_score = 10.0  # +10 for having at least one marker
+    score += marker_score
+    components["marker"] = marker_score
+    components["marker_count"] = float(len(markers))
 
     # ---- Cassette scoring (incl. out-of-order partials) ----
     def best_cassettes() -> List[Tuple[Any, Any, Any, int]]:
@@ -146,14 +170,26 @@ def score_sequence(
         triples.sort(key=lambda x: x[3], reverse=True)
         return triples[:2]
 
+    cassette_score = 0.0
     for (_, _, _, pts) in best_cassettes():
-        score += float(min(20, pts))
+        cassette_score += float(min(20, pts))
+    score += cassette_score
+    components["cassette"] = cassette_score
 
     # ---- Standalone promoter & terminator credit ----
+    promoter_score = 0.0
     if promoters:
-        score += float(min(5.0, 1.0 * len(promoters)))   # +1 each up to +5
+        promoter_score = float(min(5.0, 1.0 * len(promoters)))   # +1 each up to +5
+    score += promoter_score
+    components["promoter"] = promoter_score
+    components["promoter_count"] = float(len(promoters))
+    
+    terminator_score = 0.0
     if terminators:
-        score += float(min(5.0, 1.0 * len(terminators))) # +1 each up to +5
+        terminator_score = float(min(5.0, 1.0 * len(terminators))) # +1 each up to +5
+    score += terminator_score
+    components["terminator"] = terminator_score
+    components["terminator_count"] = float(len(terminators))
 
     # ---- Payload (GOI) anywhere ----
     target_keywords = [k.lower() for k in (target_keywords or [])]
@@ -163,11 +199,16 @@ def score_sequence(
         return r in {"payload", "goi", "reporter"} or (target_keywords and any(k in id_l for k in target_keywords))
 
     payloads = [c for c in cdss if is_payload(c)]
+    payload_score = 0.0
     if payloads:
-        score += 8.0
+        payload_score = 8.0
         # +4 if any promoter within 500 bp (either direction; same strand preferred implicitly by proximity)
         if any(distance(p, c) <= 500 for c in payloads for p in promoters):
-            score += 4.0
+            payload_score += 4.0
+    score += payload_score
+    components["payload"] = payload_score
+    components["payload_count"] = float(len(payloads))
+    components["cds_count"] = float(len(cdss))
 
     # ---- Length reward: shorter sequences get bonus ----
     L = max(0, len(sequence or ""))
@@ -183,10 +224,18 @@ def score_sequence(
         # Linear interpolation between 5kb and 30kb
         return 10.0 * (30000 - L) / (30000 - 5000)
 
-    score += length_reward(L)
+    len_score = length_reward(L)
+    score += len_score
+    components["length_bonus"] = len_score
+    components["sequence_length"] = float(L)
 
     # ---- Clamp ----
-    return float(max(0.0, min(100.0, score)))
+    final_score = float(max(0.0, min(100.0, score)))
+    components["total_score"] = final_score
+    
+    if return_components:
+        return final_score, components
+    return final_score
 
 
 def extract_dna_sequence(solution_str: str) -> str:
@@ -241,18 +290,33 @@ def compute_score(
 
     annotations = pk.annotate(sequence, is_sequence=True)
         
-        # Score the sequence (returns 0-100)
-    raw_score = score_sequence(sequence, annotations)
+    # Score the sequence (returns 0-100) with component breakdown
+    raw_score, components = score_sequence(sequence, annotations, return_components=True)
         
-        # Normalize to [0, 1] for VERL
+    # Normalize to [0, 1] for VERL
     normalized_score = raw_score / 100.0
+    
+    # Log reward components for monitoring (at INFO level so they appear in console)
+    # Sample logging: only log ~1% of the time to avoid flooding
+    import random
+    if random.random() < 0.01 or _REWARD_LOG_TIMINGS:
+        logger.info(
+            f"REWARD_BREAKDOWN: total={raw_score:.2f} | "
+            f"ori={components.get('ori', 0):.1f}(n={int(components.get('ori_count', 0))}) "
+            f"marker={components.get('marker', 0):.1f}(n={int(components.get('marker_count', 0))}) "
+            f"cassette={components.get('cassette', 0):.1f} "
+            f"prom={components.get('promoter', 0):.1f}(n={int(components.get('promoter_count', 0))}) "
+            f"term={components.get('terminator', 0):.1f}(n={int(components.get('terminator_count', 0))}) "
+            f"payload={components.get('payload', 0):.1f}(n={int(components.get('payload_count', 0))}) "
+            f"len_bonus={components.get('length_bonus', 0):.1f}({int(components.get('sequence_length', 0))}bp)"
+        )
         
     if _REWARD_LOG_TIMINGS:
         dt_ms = (time.perf_counter() - t0) * 1000.0
         logger.info(
-                f"reward.compute_score seq_len={len(sequence)} "
-                f"raw_score={raw_score:.2f} normalized={normalized_score:.4f} "
-                f"time_ms={dt_ms:.2f}"
+            f"reward.compute_score seq_len={len(sequence)} "
+            f"raw_score={raw_score:.2f} normalized={normalized_score:.4f} "
+            f"time_ms={dt_ms:.2f}"
         )
         
     return float(normalized_score)
