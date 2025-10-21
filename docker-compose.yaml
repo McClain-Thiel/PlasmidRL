@@ -93,6 +93,7 @@ services:
       context: .
       dockerfile: docker/verl.Dockerfile
     working_dir: /mcclain
+    shm_size: 8g
     volumes:
       - ./:/mcclain
       - ./config/verl_grpo.yaml:/opt/verl/verl/trainer/config/verl_grpo.yaml:ro
@@ -105,9 +106,9 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      - WANDB_ENTITY=mcclain
-      - WANDB_PROJECT=plasmidrl-verl-grpo
-      - WANDB_TAGS=["plasmid","rl","verl","grpo"]
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=plasmid-rl
+      - WANDB_TAGS=["plasmid","rl","grpo"]
       - WANDB_NOTES=VERL GRPO trainer
       - HF_TOKEN=${HF_TOKEN}
       - WANDB_API_KEY=${WANDB_API_KEY}

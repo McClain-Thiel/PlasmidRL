@@ -52,7 +52,8 @@ def score_sequence(
     Heuristic backbone score for GRPO.
 
     Rewards:
-      • ORI present: +20 (no penalty for multiple ORIs).
+      • ORI present: +20 for first ORI, -10 for each additional ORI.
+      • Marker present: +10 for having at least one marker.
       • Up to two highest-scoring cassettes with partial credit:
           - promoter→CDS: order (+5) + proximity (≤100bp:+5, ≤300:+3, ≤500:+2, ≤1000:+1).
           - CDS→terminator: order (+5) + proximity (same as above).
@@ -61,7 +62,7 @@ def score_sequence(
       • Standalone promoters (+1 each up to +5).
       • Standalone terminators (+1 each up to +5).
       • Payload (GOI) CDS anywhere: +8, plus +4 if any promoter within 500 bp.
-      • Length bonus: shorter sequences favored (linear from +15 at ≤5kb to 0 at ≥30kb).
+      • Length bonus: shorter sequences favored (linear from +10 at ≤5kb to 0 at ≥30kb).
 
     Returns [0, 100].
     """
@@ -72,6 +73,7 @@ def score_sequence(
     promoters   = [x for x in feats if T(x) == "promoter"]
     cdss        = [x for x in feats if T(x) == "cds"]
     terminators = [x for x in feats if T(x) == "terminator"]
+    markers     = [x for x in feats if T(x) == "marker"]
 
     # ---- small helpers ----
     def strand(x): return getattr(x, "strand", "+")
@@ -99,7 +101,13 @@ def score_sequence(
     # ---- ORI scoring ----
     score = 0.0
     if len(oris) >= 1:
-        score += 20.0  # Fixed 20 points for having an ORI (no penalty for multiple)
+        score += 20.0  # +20 for first ORI
+        if len(oris) > 1:
+            score -= 10.0 * (len(oris) - 1)  # -10 for each additional ORI
+    
+    # ---- Marker bonus ----
+    if len(markers) >= 1:
+        score += 10.0  # +10 for having at least one marker
 
     # ---- Cassette scoring (incl. out-of-order partials) ----
     def best_cassettes() -> List[Tuple[Any, Any, Any, int]]:
@@ -165,15 +173,15 @@ def score_sequence(
     L = max(0, len(sequence or ""))
 
     def length_reward(L: int) -> float:
-        # Linear reward from 15 pts at 5kb down to 0 pts at 30kb
+        # Linear reward from 10 pts at 5kb down to 0 pts at 30kb
         # Sequences > 30kb get 0 reward
-        # Sequences <= 5kb get max 15 pts
+        # Sequences <= 5kb get max 10 pts
         if L >= 30000:
             return 0.0
         if L <= 5000:
-            return 15.0
+            return 10.0
         # Linear interpolation between 5kb and 30kb
-        return 15.0 * (30000 - L) / (30000 - 5000)
+        return 10.0 * (30000 - L) / (30000 - 5000)
 
     score += length_reward(L)
 

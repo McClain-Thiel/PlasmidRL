@@ -2880,7 +2880,7 @@ wheels = [
 [[package]]
 name = "plasmidkit"
 version = "0.1.0"
-source = { git = "https://github.com/McClain-Thiel/plasmid-kit.git#04bb3b0621aab2259747284ea27a5ce805563781" }
+source = { git = "https://github.com/McClain-Thiel/plasmid-kit.git#5342bc09d49c2c7377dfd436a3e2746bd1383a01" }
 dependencies = [
     { name = "biopython" },
     { name = "edlib" },

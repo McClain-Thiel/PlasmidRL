@@ -55,7 +55,7 @@ actor_rollout_ref:
     kl_loss_type: low_var_kl
     ppo_epochs: 1
     optim:
-      lr: 1.0e-5
+      lr: 0.5e-5
       lr_warmup_steps_ratio: 0.0
       warmup_style: constant
       total_training_steps: -1
@@ -101,7 +101,7 @@ critic:
     override_config:
       attn_implementation: eager
   optim:
-    lr: 5.0e-5
+    lr: 2.5e-5
   ppo_micro_batch_size_per_gpu: 1
 
 reward_model:
@@ -114,19 +114,19 @@ custom_reward_function:
 algorithm:
   gamma: 1.0
   lam: 1.0
-  adv_estimator: grpo             # GRPO selected here
-  use_kl_in_reward: true          # KL shaping instead of actor loss
+  adv_estimator: grpo             
+  use_kl_in_reward: true          
   kl_penalty: kl
   kl_ctrl:
     type: adaptive
-    kl_coef: 0.001
-    horizon: 10000
-    target_kl: 0.1
+    kl_coef: 0.01
+    horizon: 3000
+    target_kl: 0.025
 
 trainer:
   total_epochs: 100                      # increased from 10 for longer training
   project_name: verl-grpo
-  experiment_name: fresh-start-20251017-1900
+  experiment_name: grpo-with-markers-2
   logger: ['console', 'wandb']
   log_val_generations: 0
   nnodes: 1
@@ -145,6 +145,6 @@ trainer:
   wandb:
     entity: mcclain
     project: verl-grpo
-    name: plasmidgpt-dna-grpo-fresh-start-20251017-1900
+    name: plasmidgpt-dna-grpo-long-20251017-1900
     tags: ['plasmidgpt-dna', 'verl', 'grpo', 'rl', 'long-run']
     notes: 'Extended GRPO training on plasmidgpt-dna for plasmid design'
