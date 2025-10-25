@@ -54,10 +54,14 @@ def score_sequence(
     Penalty:
       • Piecewise length penalty (1–10 kb, max −15) with **gentler slope at 3–5 kb**:
           1–3 kb: up to −3; 3–5 kb: to −5; 5–7.5 kb: to −9; 7.5–10 kb: to −15.
-        Ensures removing useful features can’t increase the score.
+        Ensures removing useful features can't increase the score.
 
     Returns [0, 100].
     """
+    # ---- Early return for empty sequence ----
+    if not sequence or len(sequence.strip()) == 0:
+        return 0.0
+    
     # ---- collect features (case-insensitive 'type') ----
     def T(x): return (x.type or "").lower()
     feats = list(annotations)
@@ -192,13 +196,32 @@ def score_sequence(
 
 
 def score_completions(completions: list[str]) -> list[float]:
+    
     if _REWARD_LOG_TIMINGS:
         t0 = time.perf_counter()
     if not completions:
         logger.warning("reward.score_completions called with empty completions list")
         return []
-    annotations = annotate_completions(completions)
-    scores = [score_sequence(c, a) for c, a in zip(completions, annotations)]
+    
+    # Handle empty sequences efficiently
+    scores = []
+    non_empty_indices = []
+    non_empty_completions = []
+    
+    for i, c in enumerate(completions):
+        if not c or len(c.strip()) == 0:
+            scores.append(0.0)
+        else:
+            non_empty_indices.append(i)
+            non_empty_completions.append(c)
+            scores.append(None)  # placeholder
+    
+    # Annotate and score only non-empty completions
+    if non_empty_completions:
+        annotations = annotate_completions(non_empty_completions)
+        for idx, annotation in zip(non_empty_indices, annotations):
+            scores[idx] = score_sequence(completions[idx], annotation)
+    
     if _REWARD_LOG_TIMINGS:
         dt_ms = (time.perf_counter() - t0) * 1000.0
         n = len(scores)

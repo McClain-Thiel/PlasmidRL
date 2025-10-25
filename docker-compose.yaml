@@ -3,7 +3,7 @@
 x-common: &common
   build:
     context: .
-    dockerfile: Dockerfile
+    dockerfile: docker/Dockerfile
   working_dir: /mcclain
   env_file:
     - .env
@@ -31,6 +31,9 @@ services:
   # TRL: GRPO training
   grpo-trl:
     <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     command: >
       bash -lc "
         uv sync --frozen && uv run python -m src.runners.grpo

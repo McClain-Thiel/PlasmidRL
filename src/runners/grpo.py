@@ -1,55 +1,107 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer
-from trl import GRPOConfig, GRPOTrainer
-from src.rewards import Score
+from transformers import AutoTokenizer, set_seed
+from trl import GRPOTrainer, GRPOConfig
+import torch
 from src.config import Config
+from src.rewards import Score
+import datetime
 
-config = Config()
+MODEL_ID = "McClain/plasmidgpt-addgene-gpt2"
+TRAIN_PARQUET = "data/train.parquet"
+VAL_PARQUET = "data/test.parquet"
 
-dataset_dict = load_dataset(
-    "parquet",
-    data_files={"train": config.train_dataset, "validation": config.test_dataset},
-)
-train_dataset = dataset_dict["train"]
-val_dataset = dataset_dict["validation"]
+run_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+run_name = f"grpo-{run_name}"
+save_path = f"/s3/checkpoints/verl-grpo/{run_name}"
+SEED = 42
 
-policy_id = config.model
-tokenizer = AutoTokenizer.from_pretrained(policy_id, use_fast=True)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "left"
+# ---- dataset (keep your extra cols for reward) ----
+PROMPT_KEY = "prompt"
+KEEP_EXTRA_COLS = ["data_source", "ability", "reward_model", "extra_info"]
 
+
+def select_prompt_and_extras(ds):
+    cols = set(ds.column_names)
+    keep = ["prompt"] + [c for c in KEEP_EXTRA_COLS if c in cols]
+    return ds.select_columns(keep)
+
+train_ds = load_dataset("parquet", data_files=TRAIN_PARQUET, split="train")
+train_ds = select_prompt_and_extras(train_ds)
+
+try:
+    eval_ds = load_dataset("parquet", data_files=VAL_PARQUET, split="train")
+    eval_ds = select_prompt_and_extras(eval_ds)
+    use_eval = True
+except Exception:
+    eval_ds = None
+    use_eval = False
+
+# ---- tokenizer ----
+tok = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, trust_remote_code=True)
+if tok.pad_token is None:
+    tok.pad_token = tok.eos_token
+tok.padding_side = "left"
+
+
+
+# ---- GRPO config (keys verified against TRL docs) ----
 args = GRPOConfig(
-    output_dir=config.output_dir,
-    num_generations=32,                
-    generation_batch_size=64,
-    per_device_train_batch_size=2,    
-    learning_rate=5e-6,
-    max_steps=1000,
-    logging_steps=10,
-    save_steps=20,
-    warmup_ratio=0.03,
-    bf16=True,
-    gradient_accumulation_steps=4,
-    max_prompt_length=256,
-    max_completion_length=512,
+    # transformers-style
+    output_dir=save_path,
+    num_train_epochs=20,
+    learning_rate=3e-6,
+    lr_scheduler_type="constant",
+    warmup_ratio=0.0,
+    per_device_train_batch_size=16,
+    gradient_accumulation_steps=1,
+    max_steps=-1,
+    save_strategy="steps",
+    save_steps=10,
+    logging_strategy="steps",
+    logging_steps=1,
+    bf16=torch.cuda.is_available(),
     gradient_checkpointing=False,
-    # Reward shaping & loss style:
-    scale_rewards="batch",            # robust scaling; try False for Dr.GRPO-style
-    loss_type="dapo",                 # token-normalized variant helps long CoT
-    beta=0.0,                         # KL off by default; turn on (e.g., 0.02) if you see drift
-    # Generation params:
-    temperature=1.2,
-    top_p=0.9,
+    max_grad_norm=0.5,
+    seed=SEED,
+    do_eval=use_eval,
+    eval_strategy="steps" if use_eval else "no",
+    eval_steps=10 if use_eval else None,
+
+    # model/ref-model handling
+    model_init_kwargs={"trust_remote_code": True},  # used if model is passed as string
+    disable_dropout=True,          # stabilizes ref-policy logprobs
+
+    # data & generation
+    remove_unused_columns=False,   # keep your extras for reward_fn
+    max_prompt_length=1024,
+    num_generations=8,            
+    max_completion_length=256,     
+    temperature=0.80,
+    top_p=0.90,
+
+    # GRPO specifics
+    beta=1e-3,                     # KL in loss → auto-loads ref model
+    epsilon=0.2,                   # PPO-style clip (replaces cliprange)
+    loss_type="bnpo",              # token-level normalization; avoids length bias
+    scale_rewards=True,
+    mask_truncated_completions=True,
+
+    # vLLM (colocated serverless flag is not a key here)
+    use_vllm=True,
+    vllm_gpu_memory_utilization=0.15,
+    vllm_mode="colocate"
 )
 
+# ---- trainer (NO ref_model kwarg) ----
 trainer = GRPOTrainer(
-    model=policy_id,                  # can also pass a loaded model object
-    reward_funcs=Score,         # can be a list: [grpo_reward, "rm-model-id", ...]
+    model=MODEL_ID,               
+    reward_funcs=Score,
     args=args,
-    train_dataset=train_dataset,            # expects a column "prompt" by default; see docs to customize
-    processing_class=tokenizer,       # padding side must be left; pad_token must be set
+    train_dataset=train_ds,
+    eval_dataset=eval_ds if use_eval else None,
+    processing_class=tok,
 )
 
-if __name__ == "__main__":
-    trainer.train()
+trainer.train()
+trainer.save_model(args.output_dir)
+tok.save_pretrained(args.output_dir)

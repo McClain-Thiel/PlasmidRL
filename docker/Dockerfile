@@ -11,33 +11,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       openssh-client tzdata && \
     rm -rf /var/lib/apt/lists/*
 
-# --- Non-root user (write-friendly on bind mounts) ---
-ARG USERNAME=app
-RUN useradd -m ${USERNAME}
-USER ${USERNAME}
-WORKDIR /workspace
+# --- Run as root for consistency with VERL and simpler permissions ---
+WORKDIR /mcclain
 SHELL ["/bin/bash", "-lc"]
 
 # --- Install micromamba (for bio tools) ---
 RUN curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | \
-    tar -xj -C $HOME --strip-components=1 bin/micromamba && \
-    echo 'export MAMBA_ROOT_PREFIX=$HOME/mamba' >> ~/.bashrc && \
-    echo 'export PATH="$MAMBA_ROOT_PREFIX/envs/bio/bin:$PATH"' >> ~/.bashrc
+    tar -xj -C /usr/local/bin --strip-components=1 bin/micromamba && \
+    echo 'export MAMBA_ROOT_PREFIX=/opt/mamba' >> ~/.bashrc && \
+    echo 'export PATH="/opt/mamba/envs/bio/bin:$PATH"' >> ~/.bashrc
 
-ENV MAMBA_ROOT_PREFIX=/home/${USERNAME}/mamba
-ENV PATH=/home/${USERNAME}:$PATH
+ENV MAMBA_ROOT_PREFIX=/opt/mamba
+ENV PATH=/usr/local/bin:/opt/mamba/envs/bio/bin:$PATH
 
 # --- Create a micromamba env for bio binaries ONLY (no need to mix Pythons) ---
-RUN micromamba create -y -n bio -c conda-forge -c bioconda \
+RUN /usr/local/bin/micromamba create -y -n bio -c conda-forge -c bioconda \
       blast \
       diamond \
       infernal \
-    && micromamba clean -a -y
+    && /usr/local/bin/micromamba clean -a -y
 
 # --- Install uv for fast Python dep management inside container ---
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
-ENV PATH=/home/${USERNAME}/.cargo/bin:$PATH
+    echo 'export PATH="/root/.local/bin:$PATH"' >> ~/.bashrc
+ENV PATH=/root/.local/bin:$PATH
 
 # --- Good runtime defaults ---
 ENV BLASTDB=/db/blast
