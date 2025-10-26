@@ -36,6 +36,7 @@ services:
       - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     command: >
       bash -lc "
+        mkdir -p /tmp/wandb && \
         uv sync --frozen && uv run python -m src.runners.grpo
       "
     environment:
@@ -44,6 +45,7 @@ services:
       - WANDB_PROJECT=plasmidrl-trl-grpo
       - WANDB_TAGS=["plasmid","rl","trl","grpo"]
       - WANDB_NOTES=TRL GRPO training on plasmid design
+      - WANDB_DIR=/tmp/wandb
       # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
 

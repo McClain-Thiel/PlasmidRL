@@ -36,16 +36,32 @@ except Exception:
     eval_ds = None
     use_eval = False
 
-# ---- tokenizer ----
+
 tok = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, trust_remote_code=True)
-if tok.pad_token is None:
-    tok.pad_token = tok.eos_token
 tok.padding_side = "left"
 
+# Remap specials to the correct strings (these already exist in your vocab)
+tok.eos_token = "</s>"
+tok.bos_token = "<s>"
+tok.pad_token = "[PAD]"
+
+# Re-assert
+assert tok.eos_token_id == 30001, tok.eos_token_id
+assert tok.bos_token_id == 30000, tok.bos_token_id
+assert tok.pad_token_id == 3, tok.pad_token_id
+
+# Pass IDs explicitly to the model so nothing “helpfully” changes at runtime
+model_init_kwargs = {
+    "trust_remote_code": True,
+    "eos_token_id": tok.eos_token_id,
+    "bos_token_id": tok.bos_token_id,
+    "pad_token_id": tok.pad_token_id,
+}
 
 
 # ---- GRPO config (keys verified against TRL docs) ----
 args = GRPOConfig(
+    model_init_kwargs=model_init_kwargs,
     # transformers-style
     output_dir=save_path,
     num_train_epochs=20,
@@ -56,7 +72,7 @@ args = GRPOConfig(
     gradient_accumulation_steps=1,
     max_steps=-1,
     save_strategy="steps",
-    save_steps=10,
+    save_steps=100,
     logging_strategy="steps",
     logging_steps=1,
     bf16=torch.cuda.is_available(),
@@ -65,17 +81,17 @@ args = GRPOConfig(
     seed=SEED,
     do_eval=use_eval,
     eval_strategy="steps" if use_eval else "no",
-    eval_steps=10 if use_eval else None,
+    eval_steps=100 if use_eval else None,
 
     # model/ref-model handling
-    model_init_kwargs={"trust_remote_code": True},  # used if model is passed as string
     disable_dropout=True,          # stabilizes ref-policy logprobs
 
     # data & generation
     remove_unused_columns=False,   # keep your extras for reward_fn
     max_prompt_length=1024,
     num_generations=8,            
-    max_completion_length=256,     
+    max_completion_length=256,
+    #min_completion_length=16, #not supported currently
     temperature=0.80,
     top_p=0.90,
 
@@ -84,7 +100,7 @@ args = GRPOConfig(
     epsilon=0.2,                   # PPO-style clip (replaces cliprange)
     loss_type="bnpo",              # token-level normalization; avoids length bias
     scale_rewards=True,
-    mask_truncated_completions=True,
+    mask_truncated_completions=False,
 
     # vLLM (colocated serverless flag is not a key here)
     use_vllm=True,
