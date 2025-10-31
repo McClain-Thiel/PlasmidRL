@@ -1,4 +1,4 @@
-from src.rewards.reward_config import RewardConfig
+from src.rewards.bioinformatics.reward_config import RewardConfig
 import plasmidkit as pk
 from typing import Any, List, Tuple, Union, Dict
 from concurrent.futures import ThreadPoolExecutor

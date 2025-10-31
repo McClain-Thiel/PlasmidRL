@@ -1,5 +1,7 @@
 # PlasmidRL
 
+[![Tests](https://github.com/McClain-Thiel/PlasmidRL/actions/workflows/tests.yml/badge.svg)](https://github.com/McClain-Thiel/PlasmidRL/actions/workflows/tests.yml)
+
 Reinforcement learning experiments for plasmid design. Train language models to generate functional DNA sequences using various RL algorithms.
 
 ## Quick Start

@@ -1,9 +1,8 @@
 import os
 import pytest
 
-from src.rewards.scorer import Scorer
-from src.rewards.reward_config import RewardConfig
-from src.rewards import rewards as rewards_mod
+from src.rewards.bioinformatics.scorer import Scorer
+from src.rewards.bioinformatics.reward_config import RewardConfig
 
 
 def _read_fasta_sequence(path: str) -> str:
@@ -77,22 +76,25 @@ def test_location_bonus_non_decreasing():
     assert score_on >= score_off
 
 
-def test_wrapper_score_sequence_bounds_and_consistency():
+def test_scorer_score_bounds():
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     path = os.path.join(data_dir, "pSC101.fasta")
     seq = _read_fasta_sequence(path)
-    # wrapper returns 0..100
-    s100 = rewards_mod.score_sequence(seq)
-    print(f"testlog file={os.path.basename(path)} wrapper_score_0_100={s100:.2f}")
-    assert 0.0 <= s100 <= 100.0
+    cfg = RewardConfig()
+    scorer = Scorer(cfg)
+    s, _ = scorer.score(seq)
+    print(f"testlog file={os.path.basename(path)} scorer_score_0_1={s:.4f}")
+    assert 0.0 <= s <= 1.0
 
 
-def test_score_completions_handles_empty():
+def test_simple_batch_handles_empty():
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     path = os.path.join(data_dir, "RF0G-IodoY.fasta")
     seq = _read_fasta_sequence(path)
-    scores = rewards_mod.score_completions([seq, ""]) 
-    print(f"testlog file={os.path.basename(path)} completions_scores={scores}")
-    assert len(scores) == 2
-    assert scores[1] == 0.0
-    assert 0.0 <= scores[0] <= 100.0
+    cfg = RewardConfig()
+    scorer = Scorer(cfg)
+    s_valid, _ = scorer.score(seq)
+    print(f"testlog file={os.path.basename(path)} simple_score_valid={s_valid}")
+    assert 0.0 <= s_valid <= 1.0
+    with pytest.raises(Exception):
+        scorer.score("")
