@@ -9,6 +9,8 @@ from src.rewards.bioinformatics.logger import RewardComponentLogger
 import datetime
 from typing import List
 import wandb
+from concurrent.futures import ThreadPoolExecutor
+import re
 
 cfg = Config()
 MODEL_ID = cfg.model
@@ -131,12 +133,32 @@ scorer = Scorer(reward_config)
 reward_logger = RewardComponentLogger(log_frequency=10)
 
 
-def batch_reward_fn(samples: List[str], **kwargs) -> List[float]:
-    rewards: List[float] = []
-    for seq in samples:
+def score_single(idx_and_seq):
+    idx, seq = idx_and_seq
+    try:
         score, components = scorer.score(seq)
-        rewards.append(float(score))
         reward_logger.add_components(components, float(score))
+        return float(score)
+    except Exception:
+        print(f"Warning: Failed to score completion {idx} (len={len(seq)}): {str(e)[:100]}")
+        return 0.0
+
+def batch_reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
+    """
+    TRL GRPO reward function signature.
+    Args:
+        prompts: List of prompt strings
+        completions: List of completion strings (without prompts)
+    Returns:
+        List of reward floats
+    """
+    # Clean: remove spaces, uppercase, keep only valid DNA chars
+    cleaned = [re.sub(r'[^ATCG]', '', c.upper().replace(" ", "")) for c in completions]
+    
+    # Parallelize scoring
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        rewards = list(executor.map(score_single, enumerate(cleaned)))
+    
     return rewards
 
 
