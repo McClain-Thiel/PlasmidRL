@@ -1,14 +1,19 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer, set_seed
+from transformers import AutoTokenizer, set_seed, TrainerCallback
 from trl import GRPOTrainer, GRPOConfig
 import torch
 from src.config import Config
-from src.rewards import Score
+from src.rewards.bioinformatics.scorer import Scorer
+from src.rewards.bioinformatics.reward_config import RewardConfig
+from src.rewards.bioinformatics.logger import RewardComponentLogger
 import datetime
+from typing import List
+import wandb
 
-MODEL_ID = "McClain/plasmidgpt-addgene-gpt2"
-TRAIN_PARQUET = "data/train.parquet"
-VAL_PARQUET = "data/test.parquet"
+cfg = Config()
+MODEL_ID = cfg.model
+TRAIN_PARQUET = cfg.train_dataset
+VAL_PARQUET = cfg.val_dataset
 
 run_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 run_name = f"grpo-{run_name}"
@@ -75,6 +80,7 @@ args = GRPOConfig(
     save_steps=100,
     logging_strategy="steps",
     logging_steps=1,
+    report_to=["wandb"],
     bf16=torch.cuda.is_available(),
     gradient_checkpointing=False,
     max_grad_norm=0.5,
@@ -92,7 +98,7 @@ args = GRPOConfig(
     num_generations=8,            
     max_completion_length=256,
     #min_completion_length=16, #not supported currently
-    temperature=0.80,
+    temperature=0.95,
     top_p=0.90,
 
     # GRPO specifics
@@ -108,14 +114,59 @@ args = GRPOConfig(
     vllm_mode="colocate"
 )
 
+# ---- reward config and scorer ----
+reward_config = RewardConfig(
+    ori_min=1,
+    ori_max=1,
+    promoter_min=1,
+    promoter_max=5,
+    terminator_min=0,
+    terminator_max=2,
+    marker_min=1,
+    marker_max=2,
+)
+
+scorer = Scorer(reward_config)
+
+reward_logger = RewardComponentLogger(log_frequency=10)
+
+
+def batch_reward_fn(samples: List[str], **kwargs) -> List[float]:
+    rewards: List[float] = []
+    for seq in samples:
+        score, components = scorer.score(seq)
+        rewards.append(float(score))
+        reward_logger.add_components(components, float(score))
+    return rewards
+
+
+# ---- W&B init ----
+wandb.init(
+    project=cfg.wandb_project,
+    entity=cfg.wandb_entity,
+    name=run_name,
+    config={
+        "model": MODEL_ID,
+        "reward_config": reward_config.model_dump(),
+        "grpo_config": {
+            "beta": args.beta,
+            "epsilon": args.epsilon,
+            "temperature": args.temperature,
+            "num_generations": args.num_generations,
+            "loss_type": args.loss_type,
+        },
+    },
+)
+
 # ---- trainer (NO ref_model kwarg) ----
 trainer = GRPOTrainer(
     model=MODEL_ID,               
-    reward_funcs=Score,
+    reward_funcs=[batch_reward_fn],
     args=args,
     train_dataset=train_ds,
     eval_dataset=eval_ds if use_eval else None,
     processing_class=tok,
+    callbacks=[reward_logger],
 )
 
 trainer.train()

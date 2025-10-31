@@ -68,7 +68,7 @@ class Scorer:
             evidence=getattr(x, "evidence", {}),
         )
 
-    def _merge_group(self, feats: List[Any], threshold: float) -> List["Scorer._Feat"]:
+    def _merge_group(self, feats: List[Any], threshold: float, *, respect_strand: bool) -> List["Scorer._Feat"]:
         if not feats:
             return []
         items = [self._to_feat(f) for f in feats]
@@ -78,7 +78,8 @@ class Scorer:
         for nxt in items[1:]:
             ovl = self._overlap_len(cur, nxt)
             min_len = max(1, min(self._len(cur), self._len(nxt)))
-            if ovl / float(min_len) >= threshold and cur.strand == nxt.strand:
+            strands_compatible = (cur.strand == nxt.strand) or (not respect_strand)
+            if ovl / float(min_len) >= threshold and strands_compatible:
                 cur.start = min(cur.start, nxt.start)
                 cur.end = max(cur.end, nxt.end)
                 cur.id = f"{cur.id}|{nxt.id}" if cur.id or nxt.id else None
@@ -102,7 +103,9 @@ class Scorer:
         merged_groups: Dict[str, List[Scorer._Feat]] = {}
         for t in ("rep_origin", "ori", "origin_of_replication", "promoter", "terminator", "marker", "cds"):
             if t in groups:
-                merged_groups[t] = self._merge_group(groups[t], thr)
+                # Ignore strand for ORI and marker; respect for others
+                respect = t not in ("rep_origin", "ori", "origin_of_replication", "marker")
+                merged_groups[t] = self._merge_group(groups[t], thr, respect_strand=respect)
 
         # suppress CDS if overlaps any non-CDS (ori/promoter/terminator/marker)
         non_cds: List[Scorer._Feat] = []
