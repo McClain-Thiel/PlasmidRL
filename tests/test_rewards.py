@@ -23,19 +23,19 @@ def test_scorer_components_and_bounds():
     scorer = Scorer(cfg)
 
     for p in fasta_paths:
-        score, components = scorer.score_fasta(p)
-        cfg_dump = cfg.model_dump(exclude_none=True)
         seq = _read_fasta_sequence(p)
+        score, components = scorer.score(seq, source=os.path.basename(p))
+        cfg_dump = cfg.model_dump(exclude_none=True)
         ann = scorer.annotate(seq)
         ann_view = [
             {
-                "type": getattr(a, "type", None),
-                "id": getattr(a, "id", None),
-                "start": getattr(a, "start", None),
-                "end": getattr(a, "end", None),
-                "strand": getattr(a, "strand", None),
+                "type": a.type if hasattr(a, "type") else None,
+                "id": a.id if hasattr(a, "id") else None,
+                "start": a.start if hasattr(a, "start") else None,
+                "end": a.end if hasattr(a, "end") else None,
+                "strand": a.strand if hasattr(a, "strand") else None,
             }
-            for a in ann if getattr(a, "type", None) != "restriction_site"
+            for a in ann if hasattr(a, "type") and a.type != "restriction_site"
         ]
         print(
             f"testlog file={os.path.basename(p)} config={cfg_dump} score={score:.4f} components={components} annotations={ann_view}"
@@ -61,13 +61,13 @@ def test_location_bonus_non_decreasing():
     ann = scorer_on.annotate(seq)
     ann_view = [
         {
-            "type": getattr(a, "type", None),
-            "id": getattr(a, "id", None),
-            "start": getattr(a, "start", None),
-            "end": getattr(a, "end", None),
-            "strand": getattr(a, "strand", None),
+            "type": a.type if hasattr(a, "type") else None,
+            "id": a.id if hasattr(a, "id") else None,
+            "start": a.start if hasattr(a, "start") else None,
+            "end": a.end if hasattr(a, "end") else None,
+            "strand": a.strand if hasattr(a, "strand") else None,
         }
-        for a in ann if getattr(a, "type", None) != "restriction_site"
+        for a in ann if hasattr(a, "type") and a.type != "restriction_site"
     ]
     print(f"testlog file={os.path.basename(path)} config_off={cfg_off.model_dump()} score_off={score_off:.4f} comp_off={comp_off}")
     print(f"testlog file={os.path.basename(path)} config_on={cfg_on.model_dump()} score_on={score_on:.4f} comp_on={comp_on} annotations={ann_view}")

@@ -10,6 +10,7 @@ import datetime
 from typing import List
 import wandb
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 import re
 
 cfg = Config()
@@ -35,13 +36,10 @@ def select_prompt_and_extras(ds):
 train_ds = load_dataset("parquet", data_files=TRAIN_PARQUET, split="train")
 train_ds = select_prompt_and_extras(train_ds)
 
-try:
-    eval_ds = load_dataset("parquet", data_files=VAL_PARQUET, split="train")
-    eval_ds = select_prompt_and_extras(eval_ds)
-    use_eval = True
-except Exception:
-    eval_ds = None
-    use_eval = False
+eval_ds = load_dataset("parquet", data_files=VAL_PARQUET, split="train")
+eval_ds = select_prompt_and_extras(eval_ds)
+use_eval = True
+
 
 
 tok = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, trust_remote_code=True)
@@ -118,6 +116,10 @@ args = GRPOConfig(
 
 # ---- reward config and scorer ----
 reward_config = RewardConfig(
+    punish_mode=False,
+    length_penalty=True,
+    min_length=1000,
+    max_length=30000,
     ori_min=1,
     ori_max=1,
     promoter_min=1,
@@ -130,18 +132,23 @@ reward_config = RewardConfig(
 
 scorer = Scorer(reward_config)
 
-reward_logger = RewardComponentLogger(log_frequency=10)
+reward_logger = RewardComponentLogger(log_frequency=1)
+
+# Thread-safe storage for component data
+component_lock = Lock()
 
 
 def score_single(idx_and_seq):
     idx, seq = idx_and_seq
     try:
         score, components = scorer.score(seq)
-        reward_logger.add_components(components, float(score))
-        return float(score)
-    except Exception:
+        # Thread-safe addition to logger
+        with component_lock:
+            reward_logger.add_components(components, float(score))
+        return float(score), components
+    except Exception as e:
         print(f"Warning: Failed to score completion {idx} (len={len(seq)}): {str(e)[:100]}")
-        return 0.0
+        return 0.0, None
 
 def batch_reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
     """
@@ -157,7 +164,10 @@ def batch_reward_fn(prompts: List[str], completions: List[str], **kwargs) -> Lis
     
     # Parallelize scoring
     with ThreadPoolExecutor(max_workers=8) as executor:
-        rewards = list(executor.map(score_single, enumerate(cleaned)))
+        results = list(executor.map(score_single, enumerate(cleaned)))
+    
+    # Extract just the rewards for return
+    rewards = [r[0] for r in results]
     
     return rewards
 

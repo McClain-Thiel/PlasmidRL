@@ -4,7 +4,7 @@ from typing import Optional, List
 class RewardConfig(BaseModel):
 
     punish_mode: bool = True # penaize violations of the reward config as opposed to just not rewarding them
-    length_penalty: bool = True # penalize sequences that are too long or too short
+    length_penalty: bool = False # penalize sequences that are too long or too short
     min_length: Optional[int] = None
     max_length: Optional[int] = None
     location_aware: bool = True # reward sequences that are located in the correct location (e.g. prompoter then cds then terminatr)
