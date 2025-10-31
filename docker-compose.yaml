@@ -62,6 +62,24 @@ services:
       - WANDB_TAGS=["plasmid","rl","trl","es"]
       - WANDB_NOTES=TRL Evolution Strategies optimization
 
+  # W&B Sweep Agent for hyperparameter optimization
+  grpo-sweep:
+    <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    command: >
+      bash -lc "
+        mkdir -p /tmp/wandb && \
+        uv sync --frozen && \
+        wandb agent ${SWEEP_ID}
+      "
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-grpo-sweeps
+      - WANDB_DIR=/tmp/wandb
+      - SWEEP_ID=${SWEEP_ID}
+
   # VERL: PPO trainer
   verl-ppo:
     build:

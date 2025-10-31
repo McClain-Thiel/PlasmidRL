@@ -1,0 +1,107 @@
+# W&B Sweep Configuration for PlasmidRL GRPO Training
+#
+# Usage:
+#   1. Initialize the sweep:
+#      wandb sweep sweep_config.yaml
+#
+#   2. Copy the sweep ID from output (e.g., mcclain/plasmidrl-grpo-sweeps/abc123xyz)
+#
+#   3. Run agent(s) with Docker Compose:
+#      SWEEP_ID=mcclain/plasmidrl-grpo-sweeps/abc123xyz docker compose up grpo-sweep
+#
+#   4. Optional: Run multiple agents in parallel for faster sweeps:
+#      SWEEP_ID=<sweep-id> docker compose up --scale grpo-sweep=3
+#
+# Monitor progress at: https://wandb.ai/mcclain/plasmidrl-grpo-sweeps
+
+program: src/runners/grpo_sweep.py
+method: bayes  # Options: grid, random, bayes
+metric:
+  name: reward_components/total_reward/mean
+  goal: maximize
+
+parameters:
+  # Training hyperparameters
+  learning_rate:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 1e-4
+  
+  per_device_train_batch_size:
+    values: [8, 16, 32]
+  
+  num_generations:
+    values: [4, 8, 16]
+  
+  temperature:
+    distribution: uniform
+    min: 0.7
+    max: 1.4
+  
+  top_p:
+    distribution: uniform
+    min: 0.85
+    max: 0.95
+  
+  # GRPO-specific parameters
+  beta:
+    distribution: log_uniform_values
+    min: 1e-4
+    max: 1e-2
+  
+  epsilon:
+    distribution: uniform
+    min: 0.1
+    max: 0.3
+  
+  # Reward config parameters
+  reward_punish_mode:
+    values: [true, false]
+  
+  reward_length_penalty:
+    values: [true, false]
+  
+  reward_min_length:
+    values: [500, 1000, 2000]
+  
+  reward_max_length:
+    values: [20000, 30000, 50000]
+  
+  reward_promoter_max:
+    values: [3, 5, 10]
+  
+  reward_terminator_max:
+    values: [1, 2, 3]
+  
+  reward_marker_max:
+    values: [1, 2, 3]
+  
+  reward_cds_max:
+    values: [3, 5, 10]
+  
+  reward_location_aware:
+    values: [true, false]
+  
+  # Reward component weights (0 = disabled)
+  reward_ori_weight:
+    values: [0.0, 0.5, 1.0, 2.0]
+  
+  reward_promoter_weight:
+    values: [0.0, 0.5, 1.0, 2.0]
+  
+  reward_terminator_weight:
+    values: [0.0, 0.25, 0.5, 1.0]
+  
+  reward_marker_weight:
+    values: [0.0, 0.5, 1.0, 2.0]
+  
+  reward_cds_weight:
+    values: [0.0, 0.5, 1.0, 2.0]
+
+# Early termination to stop poorly performing runs
+early_terminate:
+  type: hyperband
+  min_iter: 20  # Minimum steps before termination
+  eta: 3
+  s: 2
+
