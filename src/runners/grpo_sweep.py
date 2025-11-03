@@ -76,7 +76,7 @@ def main():
         warmup_ratio=0.0,
         per_device_train_batch_size=sweep_config.get("per_device_train_batch_size", 16),
         gradient_accumulation_steps=1,
-        max_steps=100,  # Quick evaluation for sweeps
+        max_steps=sweep_config.get("max_steps", 100),
         max_grad_norm=0.5,
         seed=42,
         

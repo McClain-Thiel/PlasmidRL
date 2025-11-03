@@ -6,7 +6,7 @@
 #
 #   2. Copy the sweep ID from output (e.g., mcclain/plasmidrl-grpo-sweeps/abc123xyz)
 #
-#   3. Run agent(s) with Docker Compose:
+#   3. Run agent(s):
 #      SWEEP_ID=mcclain/plasmidrl-grpo-sweeps/abc123xyz docker compose up grpo-sweep
 #
 #   4. Optional: Run multiple agents in parallel for faster sweeps:
@@ -14,7 +14,7 @@
 #
 # Monitor progress at: https://wandb.ai/mcclain/plasmidrl-grpo-sweeps
 
-program: src/runners/grpo_sweep.py
+program: sweeps/run_sweep_agent.py
 method: bayes  # Options: grid, random, bayes
 metric:
   name: reward_components/total_reward/mean
