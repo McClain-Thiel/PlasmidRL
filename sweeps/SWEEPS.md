@@ -43,14 +43,32 @@ All sweep configs are in `configs/`:
 - **Fixed:** Batch size 16, 8 generations (best combo)
 - **Tuned:** Learning rate, beta, epsilon, temperature, top_p
 
-### 2. `sweep_config_training.yaml`
+### 2. `sweep_config_training_with_length.yaml` (RECOMMENDED FOR NEXT SWEEP)
+**Best for:** Full hyperparameter search with length rewards
+- **Duration:** 500 steps per trial
+- **Focus:** All training hyperparameters + length rewards
+- **Fixed:** Standard reward component weights
+- **Tuned:** LR, batch size, generations, temperature, top_p, beta, epsilon, length bonus
+- **Length configs:** Tests 2 combinations:
+  - Smaller plasmids: min=2000, ideal=3000-12000, max=15000
+  - Larger plasmids: min=5000, ideal=7000-20000, max=30000
+
+### 3. `sweep_config_length_reward.yaml`
+**Best for:** Testing length-based reward strategies only
+- **Duration:** 500 steps per trial
+- **Focus:** Length reward parameters (ideal ranges, bonus multipliers)
+- **Fixed:** Best training hyperparameters from previous sweeps
+- **Tuned:** Ideal length ranges, length reward bonus
+- **Feature:** Rewards sequences within ideal length ranges with bonuses
+
+### 4. `sweep_config_training.yaml`
 **Best for:** Broad exploration of training hyperparameters
 - **Duration:** 100 steps per trial (quick evaluation)
 - **Focus:** Training parameters only
 - **Fixed:** All reward configurations
 - **Tuned:** Full ranges for LR, batch size, generations, etc.
 
-### 3. `sweep_config.yaml`
+### 5. `sweep_config.yaml`
 **Best for:** Full exploration including reward weights
 - **Duration:** 100 steps per trial
 - **Focus:** Both training and reward parameters
@@ -79,8 +97,40 @@ The sweep configurations include the following parameters:
   - `reward_terminator_weight`: 0.0, 0.25, 0.5, or 1.0
   - `reward_marker_weight`: 0.0, 0.5, 1.0, or 2.0
   - `reward_cds_weight`: 0.0, 0.5, 1.0, or 2.0
-- **Penalties**: `reward_punish_mode`, `reward_length_penalty`
-- **Features**: `reward_location_aware` (cassette bonuses)
+- **Penalties**: `reward_punish_mode`
+- **Features**: 
+  - `reward_location_aware` (cassette bonuses)
+  - `reward_length_reward_mode` (length-based rewards)
+
+### Length Reward System (NEW)
+When `reward_length_reward_mode` is enabled:
+- **Base reward (1.0)**: Sequences within `[min_length, max_length]`
+- **Bonus reward**: Sequences within `[ideal_min_length, ideal_max_length]` get up to `1.0 + length_reward_bonus`
+- **Partial bonus**: Sequences between min/ideal or ideal/max get proportional bonus
+- **Penalty**: Sequences outside acceptable range get `violation_penalty_factor` or 0.5
+
+Example configuration:
+```yaml
+reward_length_reward_mode: true
+reward_min_length: 1000      # Minimum acceptable
+reward_max_length: 30000     # Maximum acceptable
+reward_ideal_min_length: 3000  # Ideal minimum
+reward_ideal_max_length: 10000 # Ideal maximum
+reward_length_reward_bonus: 0.5  # +50% bonus for ideal range
+```
+
+## Checkpoint Management
+
+Each sweep run automatically saves checkpoints to S3:
+- **Location**: `/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-sweeps/{run_name}/`
+- **Naming**: Run name matches W&B run name (e.g., `grpo-sweep-20251103_153516`)
+- **Strategy**: Saves every 100 steps, keeps last 2 checkpoints
+- **Contents**: Model weights + tokenizer
+
+To find the best checkpoint from a sweep:
+1. Identify the best run in W&B dashboard
+2. Note the run name (visible in W&B UI)
+3. Find checkpoint at `/mnt/s3/.../checkpoints/grpo-sweeps/{run_name}/`
 
 ## Optimization Strategy
 
@@ -94,12 +144,15 @@ The sweep uses **Bayesian optimization** to intelligently explore the hyperparam
 
 ```
 sweeps/
-├── configs/                          # Sweep configuration files
-│   ├── sweep_config.yaml            # Full sweep (training + reward)
-│   ├── sweep_config_training.yaml   # Training hyperparameters only
-│   └── sweep_config_refined.yaml    # Refined ranges (500 steps)
-├── run_sweep_agent.py               # Wrapper script for W&B agent
-└── SWEEPS.md                        # This file
+├── configs/                                        # Sweep configuration files
+│   ├── sweep_config.yaml                          # Full sweep (training + reward)
+│   ├── sweep_config_training.yaml                 # Training hyperparameters only
+│   ├── sweep_config_refined.yaml                  # Refined ranges (500 steps)
+│   ├── sweep_config_training_with_length.yaml     # Training + length rewards (RECOMMENDED)
+│   └── sweep_config_length_reward.yaml            # Length reward testing only
+├── run_sweep_agent.py                             # Wrapper script for W&B agent
+├── README.md                                      # Quick reference
+└── SWEEPS.md                                      # This file - detailed documentation
 ```
 
 ## Customizing Sweeps

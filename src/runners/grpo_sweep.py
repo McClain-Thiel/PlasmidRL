@@ -34,14 +34,15 @@ def load_train_val_datasets(cfg):
 
 def main():
     """Run GRPO training with W&B sweep parameters."""
-    # Initialize W&B run (sweep agent injects config)
-    run = wandb.init()
-    
-    # Get base config and sweep params
+    # Get base config first
     cfg = Config()
-    sweep_config = wandb.config
     
-    run_name = f"sweep-{run.id}-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # Initialize W&B run with a meaningful name
+    run_name = f"grpo-sweep-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run = wandb.init(name=run_name)
+    
+    # Get sweep params
+    sweep_config = wandb.config
     
     # Dataset loading
     train_ds, eval_ds = load_train_val_datasets(cfg)
@@ -65,9 +66,10 @@ def main():
     }
     
     # Training configuration with sweep parameters
+    checkpoint_dir = f"/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-sweeps/{run_name}"
     args = GRPOConfig(
         model_init_kwargs=model_init_kwargs,
-        output_dir=f"/s3/checkpoints/verl-grpo-sweeps/{run_name}",
+        output_dir=checkpoint_dir,
         
         # Training parameters (use sweep config or defaults)
         num_train_epochs=1,  # Short for sweeps
@@ -81,7 +83,9 @@ def main():
         seed=42,
         
         # Logging and checkpointing
-        save_strategy="no",  # Don't save checkpoints for sweeps
+        save_strategy="steps",
+        save_steps=100,  # Save every 100 steps
+        save_total_limit=2,  # Keep only the last 2 checkpoints
         logging_strategy="steps",
         logging_steps=5,
         report_to=["wandb"],
@@ -120,9 +124,12 @@ def main():
     # Reward configuration with sweep parameters
     reward_config = RewardConfig(
         punish_mode=sweep_config.get("reward_punish_mode", False),
-        length_penalty=sweep_config.get("reward_length_penalty", True),
+        length_reward_mode=sweep_config.get("reward_length_reward_mode", False),
         min_length=sweep_config.get("reward_min_length", 1000),
         max_length=sweep_config.get("reward_max_length", 30000),
+        ideal_min_length=sweep_config.get("reward_ideal_min_length", None),
+        ideal_max_length=sweep_config.get("reward_ideal_max_length", None),
+        length_reward_bonus=sweep_config.get("reward_length_reward_bonus", 0.5),
         ori_min=1,
         ori_max=1,
         ori_weight=sweep_config.get("reward_ori_weight", 1.0),

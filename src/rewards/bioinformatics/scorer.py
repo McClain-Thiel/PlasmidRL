@@ -303,18 +303,55 @@ class Scorer:
         return max(0.0, min(1.0, base + cassette_bonus))
 
     def score_length(self, seq: str, annotations: Any) -> float:
-        """Score sequence length (penalty if outside allowed range)."""
-        if not self.reward_config.length_penalty:
+        """
+        Score sequence length with rewards for being within target range.
+        
+        If length_reward_mode=True:
+            - Sequences within [min_length, max_length] get full credit (1.0)
+            - Sequences within [ideal_min, ideal_max] get a bonus (up to 1.0 + length_reward_bonus)
+            - Sequences outside range get penalty or 0 based on punish_mode
+        
+        If length_reward_mode=False:
+            - Returns 1.0 (no length-based reward/penalty)
+        """
+        if not self.reward_config.length_reward_mode:
             return 1.0
+        
         L = len(seq)
         mn = self.reward_config.min_length
         mx = self.reward_config.max_length
-        assert mn is not None or mx is not None, "min_length or max_length must be set if length_penalty is True"
-        # Inside range: full credit; outside: penalty if punish_mode
-        in_range = (mn is None or L >= mn) and (mx is None or L <= mx)
-        if in_range:
-            return 1.0
-        return float(self.reward_config.violation_penalty_factor) if self.reward_config.punish_mode else 1.0
+        assert mn is not None and mx is not None, "min_length and max_length must be set if length_reward_mode is True"
+        
+        # Outside acceptable range: penalty
+        if L < mn or L > mx:
+            return float(self.reward_config.violation_penalty_factor) if self.reward_config.punish_mode else 0.5
+        
+        # Within acceptable range: base credit of 1.0
+        base_score = 1.0
+        
+        # Check for ideal range bonus
+        ideal_min = self.reward_config.ideal_min_length
+        ideal_max = self.reward_config.ideal_max_length
+        
+        if ideal_min is not None and ideal_max is not None:
+            # If within ideal range, give full bonus
+            if ideal_min <= L <= ideal_max:
+                return base_score + self.reward_config.length_reward_bonus
+            
+            # If between min-ideal_min or ideal_max-max, give partial bonus
+            # based on distance from ideal range
+            if L < ideal_min:
+                # Between min and ideal_min
+                distance_ratio = (L - mn) / (ideal_min - mn) if ideal_min > mn else 1.0
+                bonus = distance_ratio * self.reward_config.length_reward_bonus
+                return base_score + bonus
+            else:
+                # Between ideal_max and max
+                distance_ratio = (mx - L) / (mx - ideal_max) if mx > ideal_max else 1.0
+                bonus = distance_ratio * self.reward_config.length_reward_bonus
+                return base_score + bonus
+        
+        return base_score
 
     def score(self, seq: str, source: str | None = None) -> Tuple[float, Dict[str, float]]:
         """

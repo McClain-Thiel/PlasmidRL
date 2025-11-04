@@ -3,13 +3,19 @@ from typing import Optional, List
 
 class RewardConfig(BaseModel):
 
-    punish_mode: bool = True # penaize violations of the reward config as opposed to just not rewarding them
-    length_penalty: bool = False # penalize sequences that are too long or too short
-    min_length: Optional[int] = None
-    max_length: Optional[int] = None
-    location_aware: bool = True # reward sequences that are located in the correct location (e.g. prompoter then cds then terminatr)
+    punish_mode: bool = True # penalize violations of the reward config as opposed to just not rewarding them
+    length_reward_mode: bool = False # reward sequences based on length (replaces length_penalty)
+    min_length: Optional[int] = None # minimum acceptable length
+    max_length: Optional[int] = None # maximum acceptable length
+    ideal_min_length: Optional[int] = None # ideal minimum length for bonus reward
+    ideal_max_length: Optional[int] = None # ideal maximum length for bonus reward
+    length_reward_bonus: float = 0.5 # bonus multiplier for sequences in ideal length range
+    location_aware: bool = True # reward sequences that are located in the correct location (e.g. promoter then cds then terminator)
     # Penalty factor applied when min/max constraints are violated (outside of range)
     violation_penalty_factor: float = 0.5
+    
+    # Deprecated - use length_reward_mode instead
+    length_penalty: bool = False
     
     ori_min: int = 1
     ori_max: int = 1

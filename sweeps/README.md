@@ -6,40 +6,58 @@ This directory contains all files related to W&B hyperparameter sweeps for GRPO 
 
 ```
 sweeps/
-├── configs/                          # Sweep configuration files
-│   ├── sweep_config.yaml            # Full sweep (training + reward)
-│   ├── sweep_config_training.yaml   # Training hyperparameters only  
-│   └── sweep_config_refined.yaml    # Refined ranges (500 steps) - RECOMMENDED
-├── run_sweep_agent.py               # Wrapper script for W&B agent
-├── SWEEPS.md                        # Detailed documentation
-└── README.md                        # This file
+├── configs/                                   # Sweep configuration files
+│   ├── sweep_config.yaml                     # Full sweep (training + reward)
+│   ├── sweep_config_training.yaml            # Training hyperparameters only
+│   ├── sweep_config_refined.yaml             # Refined ranges (500 steps)
+│   ├── sweep_config_training_with_length.yaml # Training + length rewards ⭐ NEW
+│   └── sweep_config_length_reward.yaml       # Length reward testing only
+├── run_sweep_agent.py                        # Wrapper script for W&B agent
+├── SWEEPS.md                                 # Detailed documentation
+└── README.md                                 # This file
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Initialize sweep (from project root)
-wandb sweep sweeps/configs/sweep_config_refined.yaml
+wandb sweep sweeps/configs/sweep_config_training_with_length.yaml
 
 # 2. Run agent with the returned SWEEP_ID
 SWEEP_ID=<your-sweep-id> docker compose up grpo-sweep
+
+# Or run multiple agents in parallel for faster sweeps:
+SWEEP_ID=<your-sweep-id> docker compose up --scale grpo-sweep=3
 
 # 3. Monitor at https://wandb.ai/mcclain/plasmidrl-grpo-sweeps
 ```
 
 ## Which Config to Use?
 
-- **`sweep_config_refined.yaml`** ⭐ - Use this after initial exploration to fine-tune
+- **`sweep_config_training_with_length.yaml`** ⭐ **RECOMMENDED FOR NEXT SWEEP**
+  - 500 steps per trial for stable evaluation
+  - Broad training hyperparameter search
+  - Tests 2 length reward configurations:
+    - Smaller plasmids: 2-15kb (ideal: 3-12kb)
+    - Larger plasmids: 5-30kb (ideal: 7-20kb)
+  - Great for finding optimal hyperparameters with length rewards
+
+- **`sweep_config_refined.yaml`** - Use for fine-tuning without length rewards
   - 500 steps per trial for stable results
-  - Narrow ranges around best performers
+  - Narrow ranges around best performers from initial sweep
   - Fixed: batch_size=16, num_generations=8
   
-- **`sweep_config_training.yaml`** - Use for broad training hyperparameter exploration
+- **`sweep_config_length_reward.yaml`** - Use to explore length reward ranges only
+  - 500 steps per trial
+  - Fixed: best training hyperparameters
+  - Variable: ideal length ranges and bonus multipliers
+  
+- **`sweep_config_training.yaml`** - Use for broad exploration (no length rewards)
   - 100 steps per trial for quick iteration
   - Wide ranges for all training params
   - Fixed reward configs
   
-- **`sweep_config.yaml`** - Use to explore reward configurations too
+- **`sweep_config.yaml`** - Use to explore reward weights
   - 100 steps per trial
   - Includes reward weight tuning
   - Most comprehensive but slowest convergence
