@@ -11,12 +11,17 @@ from src.config import Config
 from src.rewards.bioinformatics.scorer import Scorer
 from src.rewards.bioinformatics.reward_config import RewardConfig
 from src.rewards.bioinformatics.logger import RewardComponentLogger
+from src.eval.eval import Evaluator
+from src.eval.eval_config import EvalConfig
+from src.utils.training_utils import EvalCallback, test_checkpoint_directory_write
+from vllm import SamplingParams
 import datetime
 from typing import List
 import wandb
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 import re
+import os
 
 
 def load_train_val_datasets(cfg):
@@ -39,7 +44,11 @@ def main():
     
     # Initialize W&B run with a meaningful name
     run_name = f"grpo-sweep-{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    run = wandb.init(name=run_name)
+    run = wandb.init(
+        name=run_name,
+        entity=cfg.wandb_entity,
+        project=cfg.wandb_project,
+    )
     
     # Get sweep params
     sweep_config = wandb.config
@@ -65,8 +74,12 @@ def main():
         "pad_token_id": tok.pad_token_id,
     }
     
-    # Training configuration with sweep parameters
-    checkpoint_dir = f"/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-sweeps/{run_name}"
+    # Training configuration - use /s3 mount point with prefix path
+    checkpoint_dir = f"/s3/{cfg.checkpoints_path.rstrip('/')}/grpo-sweeps/{run_name}"
+    
+    # Test checkpoint directory write access before proceeding
+    test_checkpoint_directory_write(checkpoint_dir)
+    
     args = GRPOConfig(
         model_init_kwargs=model_init_kwargs,
         output_dir=checkpoint_dir,
@@ -93,7 +106,7 @@ def main():
         # Evaluation
         do_eval=True,
         eval_strategy="steps",
-        eval_steps=100,
+        eval_steps=50,  # More frequent eval for sweeps to track progress
         
         # Optimization
         bf16=torch.cuda.is_available(),
@@ -148,10 +161,34 @@ def main():
         location_aware=sweep_config.get("reward_location_aware", True),
     )
     
+    # Log reward_config to wandb
+    wandb.config.update({"reward_config": reward_config.model_dump()})
+    
     # Initialize scorer and logger
     scorer = Scorer(reward_config)
     reward_logger = RewardComponentLogger(log_frequency=5)  # Log frequently for short runs
     component_lock = Lock()
+    
+    # Initialize evaluation callback
+    eval_config = EvalConfig(
+        model_name=cfg.model,
+        model_path=cfg.model,
+        prompts_path=cfg.val_dataset,  # Use test.parquet for evaluation prompts
+        prompts_column="prompt",
+        num_samples_per_prompt=5,  # Fewer samples for sweeps
+        overlap_merge_threshold=0.8,
+        sampling_params=SamplingParams(
+            max_tokens=256,
+            temperature=0.95,
+            top_p=0.90,
+            top_k=0,
+        ),
+        write_to_wandb=True,
+        wandb_project=cfg.wandb_project,
+        wandb_run_name=run_name,
+    )
+    evaluator = Evaluator(eval_config)
+    eval_callback = EvalCallback(evaluator)
     
     # Reward function
     def score_single(idx_and_seq):
@@ -179,8 +216,11 @@ def main():
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         processing_class=tok,
-        callbacks=[reward_logger],
+        callbacks=[reward_logger, eval_callback],
     )
+    
+    # Set trainer reference in callback (for accessing trainer.llm)
+    eval_callback.set_trainer(trainer)
     
     # Train
     trainer.train()
