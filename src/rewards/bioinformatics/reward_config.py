@@ -12,7 +12,7 @@ class RewardConfig(BaseModel):
     length_reward_bonus: float = 0.5 # bonus multiplier for sequences in ideal length range
     location_aware: bool = True # reward sequences that are located in the correct location (e.g. promoter then cds then terminator)
     # Penalty factor applied when min/max constraints are violated (outside of range)
-    violation_penalty_factor: float = 0.5
+    violation_penalty_factor: float = 1.0
     
     # Deprecated - use length_reward_mode instead
     length_penalty: bool = False
@@ -20,7 +20,7 @@ class RewardConfig(BaseModel):
     ori_min: int = 1
     ori_max: int = 1
     allowed_oris: Optional[List[str]] = None
-    ori_weight: float = 1.0
+    ori_weight: float = 1.5
 
     promoter_min: int = 1
     promoter_max: int = 1

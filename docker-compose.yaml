@@ -41,8 +41,8 @@ services:
       "
     environment:
       # W&B settings for this job
-      - WANDB_ENTITY=mcclain
-      - WANDB_PROJECT=plasmidrl-trl-grpo
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
       - WANDB_TAGS=["plasmid","rl","trl","grpo"]
       - WANDB_NOTES=TRL GRPO training on plasmid design
       - WANDB_DIR=/tmp/wandb
@@ -76,8 +76,8 @@ services:
         uv run wandb agent ${SWEEP_ID}
       "
     environment:
-      - WANDB_ENTITY=mcclain
-      - WANDB_PROJECT=plasmidrl-grpo-sweeps
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
       - WANDB_DIR=/tmp/wandb
       - SWEEP_ID=${SWEEP_ID}
       - PYTHONPATH=/mcclain

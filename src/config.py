@@ -47,6 +47,16 @@ class Config(BaseSettings):
     region_name: str = "us-east-1"
     runs_path: str = "runs/"
     infered_path: str = "infered/"
+    checkpoints_path: str = "checkpoints/"  # S3 prefix for checkpoint storage
+
+    # Production GRPO hyperparameters (from sweep optimization)
+    grpo_learning_rate: float = 0.00001906419115928539
+    grpo_per_device_train_batch_size: int = 16
+    grpo_num_generations: int = 4
+    grpo_temperature: float = 1.2292317925218237
+    grpo_top_p: float = 0.9086524230707756
+    grpo_beta: float = 0.00088482365318492
+    grpo_epsilon: float = 0.2649093053949679
 
     model_config = {
         "env_file": ".env",
