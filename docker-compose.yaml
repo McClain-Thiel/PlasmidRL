@@ -36,14 +36,16 @@ services:
       - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     command: >
       bash -lc "
+        mkdir -p /tmp/wandb && \
         uv sync --frozen && uv run python -m src.runners.grpo
       "
     environment:
       # W&B settings for this job
-      - WANDB_ENTITY=mcclain
-      - WANDB_PROJECT=plasmidrl-trl-grpo
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
       - WANDB_TAGS=["plasmid","rl","trl","grpo"]
       - WANDB_NOTES=TRL GRPO training on plasmid design
+      - WANDB_DIR=/tmp/wandb
       # Single simple flag to optionally resume
       - RESUME=${RESUME:-false}
 
@@ -59,6 +61,26 @@ services:
       - WANDB_PROJECT=plasmidrl-trl-es
       - WANDB_TAGS=["plasmid","rl","trl","es"]
       - WANDB_NOTES=TRL Evolution Strategies optimization
+
+  # W&B Sweep Agent for hyperparameter optimization
+  grpo-sweep:
+    <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    command: >
+      bash -lc "
+        mkdir -p /tmp/wandb && \
+        export PYTHONPATH=/mcclain && \
+        uv sync --frozen && \
+        uv run wandb agent ${SWEEP_ID}
+      "
+    environment:
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
+      - WANDB_DIR=/tmp/wandb
+      - SWEEP_ID=${SWEEP_ID}
+      - PYTHONPATH=/mcclain
 
   # VERL: PPO trainer
   verl-ppo:

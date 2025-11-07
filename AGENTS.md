@@ -117,27 +117,41 @@ PlasmidRL/
 │   ├── config.py              # Pydantic config (loads .env)
 │   ├── runners/               # Training/inference entry points
 │   │   ├── grpo.py            # TRL GRPO trainer
+│   │   ├── grpo_sweep.py      # W&B sweep runner for GRPO
 │   │   ├── es.py              # TRL Evolution Strategies trainer
 │   │   └── generate_samples.py # vLLM-based inference
 │   ├── rewards/               # Reward computation & scoring
 │   │   ├── rewards.py         # Reward signal definitions
 │   │   ├── plasmid_informatics.py  # Plasmid analysis (validity, GFP, etc.)
-│   │   └── verl_reward.py     # VERL-compatible reward wrapper
+│   │   ├── verl_reward.py     # VERL-compatible reward wrapper
+│   │   └── bioinformatics/    # Bioinformatics-based reward system
+│   │       ├── scorer.py      # Core scoring logic
+│   │       ├── reward_config.py # Reward configuration
+│   │       └── logger.py      # W&B logging callback
 │   ├── eval/                  # Evaluation utilities
 │   └── utils/                 # Helper functions (model utils, S3 access)
+├── sweeps/                    # Hyperparameter sweep configurations
+│   ├── configs/               # W&B sweep YAML configs
+│   │   ├── sweep_config.yaml            # Full sweep (training + reward)
+│   │   ├── sweep_config_training.yaml   # Training hyperparameters only
+│   │   └── sweep_config_refined.yaml    # Refined ranges (500 steps)
+│   ├── run_sweep_agent.py     # W&B agent wrapper script
+│   ├── README.md              # Quick reference
+│   └── SWEEPS.md              # Detailed sweep documentation
 ├── config/                    # YAML configs for VERL trainers
 │   ├── verl_ppo.yaml
 │   ├── verl_grpo.yaml
 │   ├── verl_naive_ppo.yaml
 │   └── naive_grpo.yaml
 ├── docker/                    # Specialized Dockerfiles
-│   ├── verl.Dockerfile       # VERL training environment
-│   └── verl-monkey.patch     # VERL patches/customizations
+│   ├── verl.Dockerfile        # VERL training environment
+│   └── verl-monkey.patch      # VERL patches/customizations
 ├── Dockerfile                 # Main development/TRL container
 ├── docker-compose.yaml        # Multi-container orchestration
-├── pyproject.toml            # UV/Python project metadata
-├── uv.lock                   # Frozen dependency lock file
-└── README.md                 # User-facing documentation
+├── pyproject.toml             # UV/Python project metadata
+├── uv.lock                    # Frozen dependency lock file
+├── AGENTS.md                  # This file - AI agent briefing
+└── README.md                  # User-facing documentation
 ```
 
 ### Code Style
@@ -381,6 +395,54 @@ uv run python -m src.main --help
 2. **Inspect checkpoints** in S3 or local output directory
 3. **Review logs** from docker-compose or runner stderr
 4. **Run with smaller dataset** or fewer steps for quick iteration
+
+### Running Hyperparameter Sweeps
+
+**Location**: `sweeps/`
+
+W&B sweeps enable automated hyperparameter optimization. The project includes three pre-configured sweep strategies:
+
+1. **Refined sweep** (`sweeps/configs/sweep_config_refined.yaml`) - **Recommended**
+   - 500 steps per trial for stable evaluation
+   - Narrow ranges around best performers from initial exploration
+   - Fixed batch_size=16, num_generations=8 (proven best combo)
+   
+2. **Training-only sweep** (`sweeps/configs/sweep_config_training.yaml`)
+   - 100 steps per trial for quick iteration
+   - Explores all training hyperparameters
+   - Fixed reward configurations
+   
+3. **Full sweep** (`sweeps/configs/sweep_config.yaml`)
+   - 100 steps per trial
+   - Includes both training and reward parameter tuning
+   - Most comprehensive but slower convergence
+
+**Workflow:**
+
+```bash
+# 1. Initialize sweep (from project root)
+wandb sweep sweeps/configs/sweep_config_refined.yaml
+
+# 2. Run agent(s) with returned SWEEP_ID
+SWEEP_ID=<sweep-id> docker compose up grpo-sweep
+
+# 3. Optional: Run multiple parallel agents for faster sweeps
+SWEEP_ID=<sweep-id> docker compose up --scale grpo-sweep=3
+
+# 4. Monitor at https://wandb.ai/mcclain/plasmidrl-grpo-sweeps
+```
+
+**Key files:**
+- `sweeps/configs/` - Sweep configuration YAMLs
+- `sweeps/run_sweep_agent.py` - W&B agent wrapper
+- `src/runners/grpo_sweep.py` - Main training script called by W&B
+- `sweeps/SWEEPS.md` - Detailed sweep documentation
+
+**Tips:**
+- Start with `sweep_config_refined.yaml` if you've done initial exploration
+- Use multiple agents (`--scale grpo-sweep=3`) to parallelize trials
+- Each 100-step trial takes ~5-10 minutes; 500-step trials take ~25-50 minutes
+- Document findings in `sweeps/README.md` for future reference
 
 ---
 

@@ -1,0 +1,124 @@
+# W&B Sweep Configuration for PlasmidRL GRPO - Length Reward Testing
+# Focus: Test length-based rewards with different ideal ranges
+# Duration: 500 steps per trial for stable evaluation
+#
+# Usage:
+#   1. Initialize the sweep:
+#      wandb sweep sweeps/configs/sweep_config_length_reward.yaml
+#
+#   2. Copy the sweep ID from output (e.g., mcclain/plasmidrl-grpo-sweeps/abc123xyz)
+#
+#   3. Run agent(s):
+#      SWEEP_ID=mcclain/plasmidrl-grpo-sweeps/abc123xyz docker compose up grpo-sweep
+#
+# Monitor progress at: https://wandb.ai/mcclain/plasmidrl-grpo-sweeps
+
+program: sweeps/run_sweep_agent.py
+method: bayes
+metric:
+  name: reward_components/total_reward/mean
+  goal: maximize
+
+parameters:
+  # ==================== TRAINING HYPERPARAMETERS (FIXED - BEST FROM PREVIOUS SWEEPS) ====================
+  
+  max_steps:
+    value: 500  # Longer runs for stable evaluation
+  
+  # Best learning rate from previous sweep
+  learning_rate:
+    value: 5.68e-05
+  
+  # Best batch size + generations combo
+  per_device_train_batch_size:
+    value: 16
+  
+  num_generations:
+    value: 8
+  
+  # Best temperature from previous sweep
+  temperature:
+    value: 1.07
+  
+  # Best top-p from previous sweep
+  top_p:
+    value: 0.904
+  
+  # Best beta from previous sweep
+  beta:
+    value: 0.0016
+  
+  # Best epsilon from previous sweep
+  epsilon:
+    value: 0.295
+  
+  # ==================== LENGTH REWARD PARAMETERS (VARIABLE) ====================
+  
+  reward_length_reward_mode:
+    value: true  # Enable length-based rewards
+  
+  reward_min_length:
+    value: 1000  # Minimum acceptable plasmid length
+  
+  reward_max_length:
+    value: 30000  # Maximum acceptable plasmid length
+  
+  # Ideal length range for bonus rewards - sweep over different ranges
+  reward_ideal_min_length:
+    values: [2000, 3000, 4000, 5000]  # Test different ideal minimums
+  
+  reward_ideal_max_length:
+    values: [8000, 10000, 12000, 15000]  # Test different ideal maximums
+  
+  # Bonus multiplier for being in ideal range
+  reward_length_reward_bonus:
+    distribution: uniform
+    min: 0.2
+    max: 1.0
+  
+  # ==================== REWARD CONFIG (FIXED - BEST FROM PREVIOUS SWEEPS) ====================
+  
+  reward_punish_mode:
+    value: true
+  
+  reward_promoter_max:
+    value: 5
+  
+  reward_terminator_max:
+    value: 2
+  
+  reward_marker_max:
+    value: 2
+  
+  reward_cds_max:
+    value: 5
+  
+  reward_location_aware:
+    value: true
+  
+  # Reward component weights (all enabled with standard weights)
+  reward_ori_weight:
+    value: 1.0
+  
+  reward_promoter_weight:
+    value: 1.0
+  
+  reward_terminator_weight:
+    value: 0.5
+  
+  reward_marker_weight:
+    value: 1.0
+  
+  reward_cds_weight:
+    value: 1.0
+
+# Early termination - adjusted for longer runs
+early_terminate:
+  type: hyperband
+  min_iter: 100  # Higher threshold for 500-step runs
+  eta: 3
+  s: 2
+
+# Optional: Limit total number of runs
+# run_cap: 30
+
