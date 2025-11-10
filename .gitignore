@@ -221,3 +221,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# artifacts
+*.zip
+/s3/
+checkpoints/
+outputs/

@@ -67,10 +67,79 @@ class Scorer:
         hi = min(max(s1, e1), max(s2, e2))
         return max(0, hi - lo)
 
+    @staticmethod
+    def _canonical_type(t: str | None) -> str:
+        """
+        Map annotation types from plasmidkit to canonical categories used by scoring and merging.
+        Canonical types: 'ori', 'promoter', 'terminator', 'marker', 'cds'.
+        """
+        if not t:
+            return ""
+        tl = t.lower()
+        # Origins of replication
+        if tl in ("rep_origin", "origin_of_replication", "ori"):
+            return "ori"
+        # Selectable markers / antibiotic resistance genes
+        if tl in ("marker", "selectable_marker", "antibiotic_resistance", "antibiotic_resistance_gene", "arg"):
+            return "marker"
+        # Standard categories
+        if tl in ("promoter", "terminator", "cds"):
+            return tl
+        # Default: return lowercased original
+        return tl
+    
+    @staticmethod
+    def _revcomp(s: str) -> str:
+        """Reverse complement of a DNA string (expects A/T/C/G)."""
+        comp = {"A": "T", "T": "A", "C": "G", "G": "C"}
+        return "".join(comp.get(c, "N") for c in reversed(s))
+    
+    def _find_repeat_regions(self, seq: str) -> List[Tuple[int, int]]:
+        """
+        Find regions containing repeats of length >= repeat_min_length.
+        Includes reverse complements (always enabled).
+        Returns merged intervals [start, end) for each repeated occurrence region.
+        """
+        if not self.reward_config.repeat_penalty_enabled:
+            return []
+        k = max(1, int(self.reward_config.repeat_min_length))
+        n = len(seq)
+        if n < k:
+            return []
+        seq_u = seq.upper()
+        valid = set("ATCG")
+        index_map: Dict[str, List[int]] = {}
+        for i in range(0, n - k + 1):
+            kmer = seq_u[i:i+k]
+            if any(c not in valid for c in kmer):
+                continue
+            rc = self._revcomp(kmer)
+            canon = kmer if kmer <= rc else rc
+            index_map.setdefault(canon, []).append(i)
+        intervals: List[Tuple[int, int]] = []
+        for _, idxs in index_map.items():
+            if len(idxs) >= 2:
+                for s in idxs:
+                    intervals.append((s, s + k))
+        if not intervals:
+            return []
+        intervals.sort(key=lambda x: (x[0], x[1]))
+        merged: List[Tuple[int, int]] = []
+        cur_s, cur_e = intervals[0]
+        for s, e in intervals[1:]:
+            if s <= cur_e:
+                if e > cur_e:
+                    cur_e = e
+            else:
+                merged.append((cur_s, cur_e))
+                cur_s, cur_e = s, e
+        merged.append((cur_s, cur_e))
+        return merged
+
     def _to_feat(self, x: Any) -> "_Feat":
         """Convert annotation object to internal _Feat representation."""
         return _Feat(
-            type=x.type.lower() if x.type else "",
+            type=self._canonical_type(x.type),
             id=x.id if hasattr(x, "id") else None,
             start=int(x.start),
             end=int(x.end),
@@ -112,7 +181,7 @@ class Scorer:
         """
         feats = list(annotations)
         thr = float(self.reward_config.overlap_merge_threshold)
-        type_key = lambda x: x.type.lower() if x.type else ""
+        type_key = lambda x: self._canonical_type(x.type)
 
         # Collect groups by type
         groups: Dict[str, List[Any]] = {}
@@ -121,15 +190,15 @@ class Scorer:
 
         # Merge per group for relevant types
         merged_groups: Dict[str, List[_Feat]] = {}
-        for t in ("rep_origin", "ori", "origin_of_replication", "promoter", "terminator", "marker", "cds"):
+        for t in ("ori", "promoter", "terminator", "marker", "cds"):
             if t in groups:
                 # Ignore strand for ORI and marker; respect for others
-                respect = t not in ("rep_origin", "ori", "origin_of_replication", "marker")
+                respect = t not in ("ori", "marker")
                 merged_groups[t] = self._merge_group(groups[t], thr, respect_strand=respect)
 
         # Suppress CDS if overlaps any non-CDS (ori/promoter/terminator/marker)
         non_cds: List[_Feat] = []
-        for t in ("rep_origin", "ori", "origin_of_replication", "promoter", "terminator", "marker"):
+        for t in ("ori", "promoter", "terminator", "marker"):
             non_cds.extend(merged_groups.get(t, []))
 
         filtered_cds: List[_Feat] = []
@@ -257,7 +326,7 @@ class Scorer:
     def score_ori(self, seq: str, annotations: Any) -> float:
         """Score origin of replication features."""
         feats = list(annotations)
-        oris = [x for x in feats if x.type and x.type.lower() in ("rep_origin", "ori", "origin_of_replication")]
+        oris = [x for x in feats if x.type and x.type.lower() == "ori"]
         oris = self._filter_allowed(oris, self.reward_config.allowed_oris)
         return self._count_score(len(oris), self.reward_config.ori_min, self.reward_config.ori_max)
 
@@ -377,12 +446,27 @@ class Scorer:
         cds = self.score_cds(seq, annotations)
         length_factor = self.score_length(seq, annotations)
         
+        # Raw counts (post-merge, using preprocessed annotations)
+        feats = list(annotations)
+        ori_count = sum(1 for x in feats if x.type and x.type.lower() == "ori")
+        promoter_count = sum(1 for x in feats if x.type and x.type.lower() == "promoter")
+        terminator_count = sum(1 for x in feats if x.type and x.type.lower() == "terminator")
+        marker_count = sum(1 for x in feats if x.type and x.type.lower() == "marker")
+        cds_count = sum(1 for x in feats if x.type and x.type.lower() == "cds")
+        
         # Weighted sum
         results = [ori, prom, term, mark, cds]
         base = sum(w * r for w, r in zip(self.weights, results))
         
         # Apply length penalty as multiplier
         final = max(0.0, min(1.0, base * length_factor))
+        
+        # Apply repeat penalty (subtract per repeated region)
+        repeat_regions = self._find_repeat_regions(seq)
+        repeat_penalty = 0.0
+        if repeat_regions:
+            repeat_penalty = float(len(repeat_regions)) * float(self.reward_config.repeat_penalty_per_region)
+            final = max(0.0, min(1.0, final - repeat_penalty))
         
         components: Dict[str, float] = {
             "ori": float(ori),
@@ -391,6 +475,14 @@ class Scorer:
             "marker": float(mark),
             "cds": float(cds),
             "length_factor": float(length_factor),
+            "repeat_regions": float(len(repeat_regions)),
+            "repeat_penalty": float(-repeat_penalty),
+            # Raw counts for descriptive logging
+            "ori_count": float(ori_count),
+            "promoter_count": float(promoter_count),
+            "terminator_count": float(terminator_count),
+            "marker_count": float(marker_count),
+            "cds_count": float(cds_count),
         }
         
         dt_ms = (time.perf_counter() - t0) * 1000.0

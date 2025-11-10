@@ -13,6 +13,10 @@ class RewardConfig(BaseModel):
     location_aware: bool = True # reward sequences that are located in the correct location (e.g. promoter then cds then terminator)
     # Penalty factor applied when min/max constraints are violated (outside of range)
     violation_penalty_factor: float = 1.0
+    # Repeat penalty configuration
+    repeat_penalty_enabled: bool = True
+    repeat_min_length: int = 50
+    repeat_penalty_per_region: float = 0.1
     
     # Deprecated - use length_reward_mode instead
     length_penalty: bool = False

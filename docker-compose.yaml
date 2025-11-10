@@ -144,6 +144,9 @@ services:
     
   infer:
     <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
     command: >
       bash -lc "
         uv sync --frozen && uv run python -m src.runners.generate_samples

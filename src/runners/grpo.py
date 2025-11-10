@@ -119,6 +119,7 @@ args = GRPOConfig(
 
 # Reward configuration - production parameters from sweep
 reward_config = RewardConfig(
+    violation_penalty_factor=0,
     punish_mode=True,  # Use punish mode for better constraint learning
     length_reward_mode=True,
     min_length=2000,
@@ -139,7 +140,7 @@ reward_config = RewardConfig(
     marker_max=2,
     marker_weight=1.0,
     cds_min=1,
-    cds_max=5,
+    cds_max=2,
     cds_weight=1.0,
     location_aware=True,
 )
