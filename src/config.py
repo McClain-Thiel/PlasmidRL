@@ -38,7 +38,7 @@ class Config(BaseSettings):
     checkpoint_interval: int = 5  # How often to save checkpoints
 
     #sample generation configuration
-    sample_model: str = "/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-production/grpo-production-20251107_135011/"
+    sample_model: str = "/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-production/grpo-production-20251110_132247"
     
     # Replay buffer configuration
     replay_buffer_size: int = 10_000

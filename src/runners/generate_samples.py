@@ -52,9 +52,9 @@ def main():
     prompts = [config.default_query, "ATG"] * 50 #strong prompt and weak prompt
 
     sampling_params = SamplingParams(
-        max_tokens=512,
-        temperature=0.8,
-        top_p=0.95,
+        max_tokens=64,
+        temperature=0.95,
+        top_p=0.90,
         top_k=0,
         repetition_penalty=1.0,
         frequency_penalty=0.0,
@@ -64,21 +64,12 @@ def main():
     
     # Normalize the model path to ensure it's recognized as a local path
     model_path = os.path.normpath(config.sample_model.rstrip("/"))
-    original_path = model_path
-    
-    # Translate host path to Docker container path if needed
-    # Host: /mnt/s3/phd-research-storage-1758274488/... -> Container: /s3/...
-    container_path = None
-    if model_path.startswith("/mnt/s3/phd-research-storage-1758274488"):
-        container_path = model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1)
-        if os.path.exists(container_path):
-            model_path = container_path
+    if not os.path.exists(model_path):
+        model_path = model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1) #this is where the syn link in docker is. 
     
     # Verify the path exists and has config.json
     if not os.path.exists(model_path):
-        checked_paths = [original_path]
-        if container_path:
-            checked_paths.append(container_path)
+        checked_paths = [original_path, model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1)]
         raise FileNotFoundError(
             f"Model path does not exist: {model_path}\n"
             f"Checked paths:\n" + "\n".join(f"  - {p}" for p in checked_paths)
@@ -108,7 +99,8 @@ def main():
     print(f"Number of records: {len(df)}")
     df = df.drop_duplicates(subset="full")
     print(f"Number of unique records: {len(df)}")
-    process_outputs(df)
+    folder_name = config.sample_model.split("/")[-1]+"_"+datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    process_outputs(df, folder_name)
     return df
 
 
