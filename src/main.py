@@ -33,6 +33,25 @@ def generate_samples():
     print(df.head())
 
 
+@cli.command("qc")
+@click.option("--input-path", required=True, help="Local dir/file or s3://bucket/prefix containing .fasta files")
+@click.option("--oridb-prefix", required=False, default=None, help="Prefix/path for ori BLAST DB (nucl)")
+@click.option("--oridb-ref", required=False, default=None, help="FASTA of ori references to build DB if missing")
+@click.option("--threads", required=False, default=1, type=int, help="Threads for BLAST/AMRFinder")
+@click.option("--skip-prodigal", is_flag=True, default=False, help="Skip running Prodigal")
+def qc(input_path: str, oridb_prefix: str | None, oridb_ref: str | None, threads: int, skip_prodigal: bool):
+    """Run plasmid QC on FASTA files; writes report back to same location and prints summary paths."""
+    from src.runners.qc_pipeline import main as qc_main
+
+    result = qc_main(
+        input_path=input_path,
+        oridb_prefix=oridb_prefix,
+        oridb_ref=oridb_ref,
+        threads=threads,
+        skip_prodigal=skip_prodigal,
+    )
+    click.echo(result)
+
 @cli.command("convert-checkpoint")
 @click.option("--checkpoint-path", required=True, help="S3 path to checkpoint (e.g., s3://bucket/path/to/checkpoint)")
 @click.option("--hf-repo", required=True, help="HuggingFace repository path (e.g., username/repo-name)")
