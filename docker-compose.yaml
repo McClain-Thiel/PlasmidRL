@@ -72,16 +72,14 @@ services:
     command: >
       bash -lc "
         mkdir -p /tmp/wandb && \
-        export PYTHONPATH=/mcclain && \
+        env && \
         uv sync --frozen && \
-        uv run wandb agent ${SWEEP_ID}
+        uv run python -m src.runners.grpo_sweep
       "
     environment:
       - WANDB_ENTITY=ucl-cssb
       - WANDB_PROJECT=PlasmidRL
       - WANDB_DIR=/tmp/wandb
-      - SWEEP_ID=${SWEEP_ID}
-      - PYTHONPATH=/mcclain
 
   # VERL: PPO trainer
   verl-ppo:

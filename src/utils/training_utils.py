@@ -230,9 +230,9 @@ class EvalCallback(TrainerCallback):
         
         if not has_df:
             return
-
+        
         df = results_df
-
+        
         # Log summary statistics for numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns
         stats = {}

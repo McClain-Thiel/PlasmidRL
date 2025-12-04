@@ -16,6 +16,7 @@ dependencies = [
     "jupyter-client>=8.6.3",
     "jupyter-core>=5.8.1",
     "jupyterlab>=4.4.7",
+    "optuna>=4.6.0",
     "plasmidkit",
     "psutil>=7.0.0",
     "pydantic>=2.0.0",
