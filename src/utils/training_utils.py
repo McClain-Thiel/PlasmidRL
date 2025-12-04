@@ -1,5 +1,6 @@
+from dataclasses import dataclass
 from transformers import TrainerCallback
-from typing import Any, Protocol, Optional
+from typing import Any, Dict, Protocol, Optional
 import wandb
 import pandas as pd
 import os
@@ -61,6 +62,14 @@ def test_checkpoint_directory_write(checkpoint_dir: str) -> None:
         sys.exit(1)
 
 
+@dataclass
+class EvaluationResult:
+    """Container for evaluation table and additional summary metrics."""
+
+    dataframe: pd.DataFrame
+    metrics: Dict[str, float]
+
+
 class EvalRunner(ABC):
     """
     Protocol for evaluation runner classes.
@@ -73,7 +82,7 @@ class EvalRunner(ABC):
     """
     
     @abstractmethod
-    def run_with_trainer(self, trainer: Any, wandb_run: Optional[Any] = None) -> pd.DataFrame:
+    def run_with_trainer(self, trainer: Any, wandb_run: Optional[Any] = None) -> EvaluationResult:
         """
         Run evaluation using the trainer's model directly.
         
@@ -82,7 +91,8 @@ class EvalRunner(ABC):
             wandb_run: Optional wandb run object for logging
             
         Returns:
-            DataFrame with evaluation results, each row containing evaluation metrics
+            EvaluationResult containing a DataFrame with evaluation metrics and
+            optional summary metrics that should also be logged (e.g., self-BLEU).
         """
         ...
 
@@ -149,14 +159,16 @@ class EvalCallback(TrainerCallback):
                 print(f"[EvalCallback] W&B Run URL: {wandb_url}")
             
             # Run evaluation using the trainer's model directly
-            results_df = self.evaluator.run_with_trainer(trainer, wandb_run)
+            evaluation_result = self.evaluator.run_with_trainer(trainer, wandb_run)
+            results_df = evaluation_result.dataframe if evaluation_result else pd.DataFrame()
+            extra_metrics = evaluation_result.metrics if evaluation_result else {}
             
-            if results_df is None or len(results_df) == 0:
+            if (results_df is None or len(results_df) == 0) and not extra_metrics:
                 print("[EvalCallback] Warning: Evaluation returned no results")
                 return
             
             # Log results to wandb
-            self._log_results(results_df, state.global_step)
+            self._log_results(results_df, state.global_step, extra_metrics)
             
             print(f"[EvalCallback] Logged evaluation results for step {state.global_step}")
             
@@ -189,25 +201,38 @@ class EvalCallback(TrainerCallback):
         # If no checkpoint exists yet, return None - evaluator will use base model
         return None
     
-    def _log_results(self, results_df: pd.DataFrame, step: int) -> None:
+    def _log_results(
+        self,
+        results_df: Optional[pd.DataFrame],
+        step: int,
+        extra_metrics: Optional[Dict[str, float]] = None,
+    ) -> None:
         """
         Log evaluation results to wandb as both table and artifact.
         
         Args:
-            results_df: DataFrame containing evaluation results
+            results_df: DataFrame containing evaluation results (optional when logging only extra metrics)
             step: Current training step
+            extra_metrics: Additional scalar metrics to log alongside the table
         """
-        if results_df is None or len(results_df) == 0:
+        has_df = results_df is not None and len(results_df) > 0
+        if not has_df and not extra_metrics:
             return
+
+        payload = {"eval/step": step}
+        if has_df:
+            payload["eval/results_table"] = wandb.Table(dataframe=results_df)
+
+        if extra_metrics:
+            payload.update(extra_metrics)
+
+        wandb.log(payload)
         
+        if not has_df:
+            return
+
         df = results_df
-        
-        # Log as wandb table (for quick dashboard viewing)
-        wandb.log({
-            "eval/step": step,
-            "eval/results_table": wandb.Table(dataframe=df),
-        })
-        
+
         # Log summary statistics for numeric columns
         numeric_cols = df.select_dtypes(include=['number']).columns
         stats = {}

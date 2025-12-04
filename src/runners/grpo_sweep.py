@@ -7,12 +7,11 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from trl import GRPOTrainer, GRPOConfig
 import torch
-from src.config import Config
+from src.config import Config, EvalConfig
 from src.rewards.bioinformatics.scorer import Scorer
 from src.rewards.bioinformatics.reward_config import RewardConfig
 from src.rewards.bioinformatics.logger import RewardComponentLogger
 from src.eval.eval import Evaluator
-from src.eval.eval_config import EvalConfig
 from src.utils.training_utils import EvalCallback, test_checkpoint_directory_write
 from vllm import SamplingParams
 import datetime

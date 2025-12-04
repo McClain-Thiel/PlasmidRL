@@ -7,7 +7,7 @@ from src.rewards.bioinformatics.scorer import Scorer
 from src.rewards.bioinformatics.reward_config import RewardConfig
 from src.rewards.bioinformatics.logger import RewardComponentLogger
 from src.eval.eval import Evaluator
-from src.eval.eval_config import EvalConfig
+from src.config import EvalConfig
 from src.utils.training_utils import EvalCallback, test_checkpoint_directory_write
 from vllm import SamplingParams
 import datetime
@@ -124,8 +124,8 @@ reward_config = RewardConfig(
     length_reward_mode=True,
     min_length=2000,
     max_length=30000,
-    ideal_min_length=7000,
-    ideal_max_length=20000,
+    ideal_min_length=3000,
+    ideal_max_length=6000,
     length_reward_bonus=0.7085046275614012,
     ori_min=1,
     ori_max=1,

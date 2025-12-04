@@ -1,8 +1,10 @@
+from collections import Counter
+import math
+
 from vllm import LLM, SamplingParams
 from typing import Optional, List, Dict, Any
-from src.eval.eval_config import EvalConfig
-from src.utils.training_utils import EvalRunner
-from src.config import Config
+from src.utils.training_utils import EvalRunner, EvaluationResult
+from src.config import Config, EvalConfig
 import pandas as pd
 import os
 import plasmidkit as pk
@@ -283,7 +285,8 @@ class Evaluator(EvalRunner):
         
         print(f"[Evaluator] Generated and analyzed {len(df)} rollouts")
         
-        return df
+        metrics = self._maybe_compute_self_bleu_metrics(sampling_params)
+        return EvaluationResult(dataframe=df, metrics=metrics)
     
     def _load_prompts(self) -> List[str]:
         """
@@ -363,3 +366,113 @@ class Evaluator(EvalRunner):
             import traceback
             traceback.print_exc()
             raise
+
+    def _maybe_compute_self_bleu_metrics(self, sampling_params: SamplingParams) -> Dict[str, float]:
+        """Compute self-BLEU on repeated prompt rollouts if configured."""
+        metrics: Dict[str, float] = {}
+
+        prompt = (self.config.self_bleu_prompt or "").strip()
+        if not prompt:
+            return metrics
+
+        num_samples = max(1, self.config.self_bleu_sample_count)
+        score, samples_used = self._evaluate_self_bleu_for_prompt(prompt, sampling_params, num_samples)
+        metrics["eval/self_bleu"] = score
+        metrics["eval/self_bleu_samples"] = float(samples_used)
+        return metrics
+
+    def _evaluate_self_bleu_for_prompt(
+        self,
+        prompt: str,
+        sampling_params: SamplingParams,
+        num_samples: int,
+    ) -> tuple[float, int]:
+        """Generate rollouts from a single prompt and compute self-BLEU."""
+        outputs = self.llm.generate([prompt] * num_samples, sampling_params)
+        sequences: List[str] = []
+        for output in outputs:
+            completion = output.outputs[0].text
+            cleaned = re.sub(r'[^ATCG]', '', completion.upper())
+            if cleaned:
+                sequences.append(cleaned)
+
+        score = self._compute_self_bleu(sequences, self.config.self_bleu_max_n)
+        return score, len(sequences)
+
+    def _compute_self_bleu(self, sequences: List[str], max_n: int) -> float:
+        """Simple self-BLEU implementation tailored for DNA tokens."""
+        if len(sequences) < 2:
+            return 0.0
+
+        total_score = 0.0
+        for idx, candidate in enumerate(sequences):
+            references = [seq for i, seq in enumerate(sequences) if i != idx]
+            total_score += self._calculate_bleu(candidate, references, max_n)
+        return total_score / len(sequences)
+
+    def _calculate_bleu(self, candidate: str, references: List[str], max_n: int) -> float:
+        """Compute BLEU score for a single candidate against multiple references."""
+        candidate_tokens = list(candidate)
+        if not candidate_tokens or not references:
+            return 0.0
+
+        log_precision_sum = 0.0
+        valid_precisions = 0
+        for n in range(1, max_n + 1):
+            cand_ngrams = self._ngram_counts(candidate_tokens, n)
+            total_cand_ngrams = sum(cand_ngrams.values())
+            if total_cand_ngrams == 0:
+                continue
+
+            ref_ngrams = self._max_reference_ngrams(references, n)
+            overlap = sum(
+                min(count, ref_ngrams.get(ngram, 0)) for ngram, count in cand_ngrams.items()
+            )
+            precision = (overlap + 1) / (total_cand_ngrams + 1)
+            log_precision_sum += math.log(precision)
+            valid_precisions += 1
+
+        if valid_precisions == 0:
+            return 0.0
+
+        geometric_mean = math.exp(log_precision_sum / valid_precisions)
+
+        candidate_len = len(candidate_tokens)
+        if candidate_len == 0:
+            return 0.0
+
+        closest_ref_len = self._closest_reference_length(candidate_len, references)
+        bp = 1.0
+        if candidate_len < closest_ref_len:
+            bp = math.exp(1 - closest_ref_len / candidate_len)
+        return bp * geometric_mean
+
+    @staticmethod
+    def _ngram_counts(tokens: List[str], n: int) -> Counter:
+        if len(tokens) < n:
+            return Counter()
+        return Counter(tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1))
+
+    @staticmethod
+    def _max_reference_ngrams(references: List[str], n: int) -> Counter:
+        max_counts: Counter = Counter()
+        for reference in references:
+            tokens = list(reference)
+            ref_counts = Counter(
+                tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1)
+            )
+            for ngram, count in ref_counts.items():
+                max_counts[ngram] = max(max_counts.get(ngram, 0), count)
+        return max_counts
+
+    @staticmethod
+    def _closest_reference_length(candidate_len: int, references: List[str]) -> int:
+        best_len = len(references[0]) if references else 0
+        best_diff = abs(best_len - candidate_len)
+        for reference in references:
+            ref_len = len(reference)
+            diff = abs(ref_len - candidate_len)
+            if diff < best_diff or (diff == best_diff and ref_len < best_len):
+                best_len = ref_len
+                best_diff = diff
+        return best_len

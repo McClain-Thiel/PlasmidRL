@@ -1,6 +1,7 @@
 from typing import Optional
-from pydantic import SecretStr, Field, AliasChoices
+from pydantic import BaseModel, ConfigDict, SecretStr, Field, AliasChoices
 from pydantic_settings import BaseSettings
+from vllm import SamplingParams
 
 class Config(BaseSettings):
     # Model and environment configuration
@@ -9,7 +10,7 @@ class Config(BaseSettings):
         default=None,
         validation_alias=AliasChoices("hf_token", "HF_TOKEN", "HUGGINGFACE_TOKEN"),
     )
-    model: str = "McClain/plasmidgpt-addgene-gpt2"
+    model: str = "UCL-CSSB/PlasmidGPT-SFT"#"McClain/plasmidgpt-addgene-gpt2"
     
     # Additional environment variables
     cuda_visible_devices: str = "all"
@@ -38,7 +39,7 @@ class Config(BaseSettings):
     checkpoint_interval: int = 5  # How often to save checkpoints
 
     #sample generation configuration
-    sample_model: str = "/mnt/s3/phd-research-storage-1758274488/checkpoints/grpo-production/grpo-production-20251110_132247"
+    sample_model: str = "UCL-CSSB/PlasmidGPT-SFT"
     
     # Replay buffer configuration
     replay_buffer_size: int = 10_000
@@ -62,6 +63,32 @@ class Config(BaseSettings):
         "env_file": ".env",
         "extra": "ignore"  # Ignore extra environment variables
     }
+
+
+class EvalConfig(BaseModel):
+    """
+    Evaluation configuration that used to live in eval/eval_config.py.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    model_name: str
+    model_path: str
+
+    prompts_path: Optional[str] = None
+    prompts_column: str = "prompt"
+    num_samples_per_prompt: int = 10
+
+    overlap_merge_threshold: float = 0.8
+
+    sampling_params: Optional[SamplingParams] = None
+
+    write_to_wandb: bool = False
+    wandb_project: Optional[str] = None
+    wandb_run_name: Optional[str] = None
+
+    self_bleu_prompt: Optional[str] = "ATG"
+    self_bleu_sample_count: int = 10
+    self_bleu_max_n: int = 4
 
 def get_config() -> Config:
     """Get the configuration instance."""

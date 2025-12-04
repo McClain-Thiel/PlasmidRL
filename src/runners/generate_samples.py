@@ -6,7 +6,9 @@ import io
 import pandas as pd
 import os
 from typing import Optional
+from huggingface_hub import HfApi
 
+hf_api = HfApi()
 
 config = get_config()
 
@@ -52,7 +54,7 @@ def main():
     prompts = [config.default_query, "ATG"] * 50 #strong prompt and weak prompt
 
     sampling_params = SamplingParams(
-        max_tokens=64,
+        max_tokens=256,
         temperature=0.95,
         top_p=0.90,
         top_k=0,
@@ -61,25 +63,27 @@ def main():
         presence_penalty=0.0,
         stop_token_ids=[2] #be careful here, this is hard coded to the [SEP] token for the GPT2 model
     )
-    
-    # Normalize the model path to ensure it's recognized as a local path
-    model_path = os.path.normpath(config.sample_model.rstrip("/"))
-    if not os.path.exists(model_path):
-        model_path = model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1) #this is where the syn link in docker is. 
-    
-    # Verify the path exists and has config.json
-    if not os.path.exists(model_path):
-        checked_paths = [original_path, model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1)]
-        raise FileNotFoundError(
-            f"Model path does not exist: {model_path}\n"
-            f"Checked paths:\n" + "\n".join(f"  - {p}" for p in checked_paths)
-        )
-    
-    config_json = os.path.join(model_path, "config.json")
-    if not os.path.exists(config_json):
-        raise FileNotFoundError(f"config.json not found at: {config_json}")
-    
-    print(f"Loading model from: {model_path}")
+    # Check HuggingFace first, then try local paths
+    model_path = config.sample_model
+    try:
+        hf_api.model_info(model_path)
+        # HuggingFace model found, use it directly
+        print(f"Loading model from HuggingFace: {model_path}")
+    except Exception:
+        # Not on HuggingFace, try local paths
+        model_path = os.path.normpath(model_path.rstrip("/"))
+        if not os.path.exists(model_path):
+            # Try Docker mount path conversion
+            model_path = model_path.replace("/mnt/s3/phd-research-storage-1758274488", "/s3", 1)
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model path does not exist: {config.sample_model}")
+        
+        config_json = os.path.join(model_path, "config.json")
+        if not os.path.exists(config_json):
+            raise FileNotFoundError(f"config.json not found at: {config_json}")
+        
+        print(f"Loading model from local path: {model_path}")
     # Reduce GPU memory utilization to work with limited available memory
     # Default is 0.9 (90%), but we need to use less when other processes are using GPU
     llm = LLM(model=model_path, gpu_memory_utilization=0.12)
