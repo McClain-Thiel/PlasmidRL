@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "PlasmidRL: Effects of Structural Reward Shaping on Biophysical Properties in RL-Trained Plasmid Generators"
+message: "If you use this software or its results, please cite the accompanying paper."
+type: software
+authors:
+  - family-names: Thiel
+    given-names: McClain
+    affiliation: University College London
+  - family-names: Cunningham
+    given-names: Angus G.
+    affiliation: University College London
+  - family-names: Barnes
+    given-names: Chris P.
+    affiliation: University College London
+repository-code: "https://github.com/UCL-CSSB/PlasmidRL"
+license: MIT
+preferred-citation:
+  type: conference-paper
+  title: "Effects of Structural Reward Shaping on Biophysical Properties in RL-Trained Plasmid Generators"
+  authors:
+    - family-names: Thiel
+      given-names: McClain
+    - family-names: Cunningham
+      given-names: Angus G.
+    - family-names: Barnes
+      given-names: Chris P.
+  conference:
+    name: "International Conference on Machine Learning (ICML)"
+  year: 2026

@@ -1,0 +1,11 @@
+name: plasmidrl-qc
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - python=3.11
+  - blast>=2.16
+  - ncbi-amrfinderplus>=4
+  - viennarna>=2.6
+  - sourmash>=4.8
+  - pip

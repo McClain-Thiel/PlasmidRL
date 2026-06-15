@@ -1,0 +1,103 @@
+
+# this is the yaml version of a function or variable we can reuse
+x-common: &common
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  working_dir: /mcclain
+  env_file:
+    - .env
+  volumes:
+    - ./:/mcclain
+  restart: unless-stopped
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-s3: &s3mount
+  - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+
+services:
+  # Interactive shell for debugging
+  dev:
+    <<: *common
+    command: bash
+    tty: true
+
+  # TRL: GRPO training
+  grpo-trl:
+    <<: *common
+    restart: "no"  # Don't auto-restart when training completes
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    command: >
+      bash -lc "
+        mkdir -p /tmp/wandb && \
+        uv sync --frozen && uv run python -m src.runners.grpo
+      "
+    environment:
+      # W&B settings for this job
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
+      - WANDB_TAGS=["plasmid","rl","trl","grpo"]
+      - WANDB_NOTES=TRL GRPO training on plasmid design
+      - WANDB_DIR=/tmp/wandb
+      # Single simple flag to optionally resume
+      - RESUME=${RESUME:-false}
+
+  # TRL: Evolution Strategies optimization
+  es:
+    <<: *common
+    command: >
+      bash -lc "
+        uv sync --frozen && uv run python -m src.runners.es
+      "
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-trl-es
+      - WANDB_TAGS=["plasmid","rl","trl","es"]
+      - WANDB_NOTES=TRL Evolution Strategies optimization
+
+  # W&B Sweep Agent for hyperparameter optimization
+  grpo-sweep:
+    <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    command: >
+      bash -lc "
+        mkdir -p /tmp/wandb && \
+        env && \
+        uv sync --frozen && \
+        uv run python -m src.runners.grpo_sweep
+      "
+    environment:
+      - WANDB_ENTITY=ucl-cssb
+      - WANDB_PROJECT=PlasmidRL
+      - WANDB_DIR=/tmp/wandb
+
+  infer:
+    <<: *common
+    volumes:
+      - ./:/mcclain
+      - /mnt/s3/phd-research-storage-1758274488:/s3:rw
+    command: >
+      bash -lc "
+        uv sync --frozen && uv run python -m src.runners.generate_samples
+      "
+
+  # Optional: evaluation CLI if present
+  eval:
+    <<: *common
+    command: >
+      bash -lc "uv sync --frozen && uv run -m src.cli eval"
+    environment:
+      - WANDB_ENTITY=mcclain
+      - WANDB_PROJECT=plasmidrl-eval
+      - WANDB_TAGS=["eval"]
+      - WANDB_NOTES=Evaluation job
